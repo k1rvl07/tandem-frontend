@@ -1,24 +1,18 @@
 import { z } from 'zod'
 
-const emailSchema = z.string().trim().email('invalid email format')
-
-const passwordSchema = z.string().min(8, 'password must be at least 8 characters')
-
-export const registerSchema = z
-  .object({
-    email: emailSchema,
-    password: passwordSchema,
-    confirm_password: passwordSchema,
-  })
-  .refine((data) => data.password === data.confirm_password, {
-    message: 'passwords do not match',
-    path: ['confirm_password'],
-  })
+const loginSchemaString = z
+  .string()
+  .trim()
+  .min(3, 'login must be at least 3 characters')
+  .max(50, 'login must be at most 50 characters')
+  .regex(
+    /^[a-z0-9][a-z0-9._-]*$/,
+    'login may contain lowercase letters, digits, dots, dashes and underscores',
+  )
 
 export const loginSchema = z.object({
-  email: z.string().trim().min(1, 'email is required'),
+  login: loginSchemaString,
   password: z.string().min(1, 'password is required'),
 })
 
-export type RegisterFormValues = z.infer<typeof registerSchema>
 export type LoginFormValues = z.infer<typeof loginSchema>

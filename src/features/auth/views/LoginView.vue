@@ -33,8 +33,7 @@ async function onSubmit(values: LoginFormValues) {
 			<LoginForm :submit-label="submitting ? 'Signing in...' : 'Login'" :disabled="submitting" @submit="onSubmit" />
 			<p v-if="error" class="mt-4 text-sm text-blue-700 dark:text-blue-400">{{ error }}</p>
 			<p class="mt-4 text-sm text-neutral-600 dark:text-neutral-400">
-				No account yet?
-				<RouterLink to="/register" class="text-blue-700 hover:underline dark:text-blue-400">Register</RouterLink>
+				Account is provisioned by your administrator.
 			</p>
 		</div>
 	</div>

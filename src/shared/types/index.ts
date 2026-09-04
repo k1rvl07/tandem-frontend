@@ -1,18 +1,18 @@
+export type UserRole = 'admin' | 'moderator' | 'user'
+
 export interface User {
   id: string
-  email: string
+  login: string
+  role: UserRole
+  display_name: string
+  bio: string
+  avatar_key: string
   created_at: string
   updated_at: string
 }
 
-export interface RegisterRequest {
-  email: string
-  password: string
-  confirm_password: string
-}
-
 export interface LoginRequest {
-  email: string
+  login: string
   password: string
 }
 
@@ -23,4 +23,21 @@ export interface LoginResponse {
 
 export interface ApiError {
   error: string
+}
+
+export interface CreateUserRequest {
+  login: string
+  password: string
+  display_name: string
+  role: UserRole
+}
+
+export interface UpdateProfileRequest {
+  display_name: string
+  bio: string
+}
+
+export interface ChangePasswordRequest {
+  new_password: string
+  current_password: string
 }
