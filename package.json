@@ -12,13 +12,16 @@
     "lint": "biome lint ."
   },
   "dependencies": {
+    "@vueuse/core": "^14.4.0",
     "axios": "^1.7.2",
     "pinia": "^2.2.2",
     "vue": "^3.4.29",
-    "vue-router": "^4.4.0"
+    "vue-router": "^4.4.0",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.11",
+    "@types/node": "^26.4.1",
     "@vitejs/plugin-vue": "^5.0.5",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
