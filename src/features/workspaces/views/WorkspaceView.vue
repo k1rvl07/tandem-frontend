@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { WorkspaceDetail, WorkspaceMember } from '@/shared/types'
+import { createBoard, listBoards } from '@/features/boards/api'
+import { type BoardFormValues, boardFormSchema } from '@/features/boards/schema'
+import type { Board, WorkspaceDetail, WorkspaceMember } from '@/shared/types'
 import { extractError } from '@/shared/utils/error'
 import { collectErrors } from '@/shared/utils/validation'
 import { useAuthStore } from '@/stores/auth'
@@ -26,6 +28,7 @@ const auth = useAuthStore()
 
 const workspaceId = computed(() => String(route.params.id))
 const detail = ref<WorkspaceDetail | null>(null)
+const boards = ref<Board[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 const savingError = ref<string | null>(null)
@@ -45,6 +48,9 @@ const memberValidation = ref<Partial<Record<keyof AddMemberValues, string>>>({})
 
 const transferTarget = ref('')
 
+const boardForm = reactive<BoardFormValues>({ name: '' })
+const boardValidation = ref<Partial<Record<keyof BoardFormValues, string>>>({})
+
 async function load() {
   loading.value = true
   loadError.value = null
@@ -61,6 +67,32 @@ async function load() {
     loadError.value = extractError(e)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadBoards() {
+  try {
+    boards.value = await listBoards(workspaceId.value)
+  } catch (e) {
+    actionError.value = extractError(e)
+  }
+}
+
+async function onCreateBoard() {
+  const result = boardFormSchema.safeParse(boardForm)
+  if (!result.success) {
+    boardValidation.value = collectErrors(result.error.issues)
+    return
+  }
+  boardValidation.value = {}
+  actionError.value = null
+  try {
+    const created = await createBoard(workspaceId.value, result.data)
+    boardForm.name = ''
+    await loadBoards()
+    await router.push(`/workspaces/${workspaceId.value}/boards/${created.id}`)
+  } catch (e) {
+    actionError.value = extractError(e)
   }
 }
 
@@ -165,8 +197,14 @@ function clearMemberError(field: keyof AddMemberValues) {
   }
 }
 
-onMounted(load)
-watch(workspaceId, load)
+onMounted(() => {
+  load()
+  loadBoards()
+})
+watch(workspaceId, () => {
+  load()
+  loadBoards()
+})
 </script>
 
 <template>
@@ -269,6 +307,44 @@ watch(workspaceId, load)
 						class="max-w-xs bg-blue-700 px-4 py-2 text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-neutral-900"
 					>
 						Add member
+					</button>
+				</form>
+			</section>
+
+			<section class="border border-neutral-300 bg-white p-6 dark:border-neutral-700 dark:bg-neutral-900">
+				<h2 class="mb-4 text-lg text-neutral-900 dark:text-neutral-100">Boards</h2>
+				<p v-if="boards.length === 0" class="text-sm text-neutral-600 dark:text-neutral-400">
+					No boards yet.
+				</p>
+				<ul class="flex flex-col gap-2">
+					<li v-for="board in boards" :key="board.id">
+						<RouterLink
+							:to="`/workspaces/${workspaceId}/boards/${board.id}`"
+							class="block border border-neutral-300 px-4 py-3 text-neutral-900 hover:bg-neutral-100 focus:outline-none dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-800"
+						>
+							{{ board.name }}
+						</RouterLink>
+					</li>
+				</ul>
+				<form v-if="canEdit" class="mt-4 flex flex-col gap-4 border-t border-neutral-200 pt-4 dark:border-neutral-800" novalidate @submit.prevent="onCreateBoard">
+					<div class="flex flex-col gap-1">
+						<label for="board_name" class="text-sm">New board name</label>
+						<input
+							id="board_name"
+							v-model="boardForm.name"
+							type="text"
+							autocomplete="off"
+							class="border border-neutral-300 bg-white px-3 py-2 text-neutral-900 outline-none focus:border-blue-600 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-blue-400"
+						/>
+						<p v-if="boardValidation.name" class="text-sm text-blue-700 dark:text-blue-400">
+							{{ boardValidation.name }}
+						</p>
+					</div>
+					<button
+						type="submit"
+						class="max-w-xs bg-blue-700 px-4 py-2 text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-neutral-900"
+					>
+						Create board
 					</button>
 				</form>
 			</section>
