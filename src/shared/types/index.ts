@@ -41,3 +41,52 @@ export interface ChangePasswordRequest {
   new_password: string
   current_password: string
 }
+
+export type WorkspaceRole = 'owner' | 'editor' | 'viewer'
+
+export interface Workspace {
+  id: string
+  name: string
+  description: string
+  role: WorkspaceRole
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceMember {
+  id: string
+  login: string
+  display_name: string
+  avatar_key: string
+  role: WorkspaceRole
+  joined_at: string
+}
+
+export interface WorkspaceDetail {
+  id: string
+  name: string
+  description: string
+  role: WorkspaceRole
+  created_at: string
+  updated_at: string
+  members: WorkspaceMember[]
+}
+
+export interface CreateWorkspaceRequest {
+  name: string
+  description: string
+}
+
+export interface UpdateWorkspaceRequest {
+  name: string
+  description: string
+}
+
+export interface AddMemberRequest {
+  login: string
+  role: WorkspaceRole
+}
+
+export interface TransferOwnerRequest {
+  user_id: string
+}

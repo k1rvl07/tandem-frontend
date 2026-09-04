@@ -26,6 +26,18 @@ const router = createRouter({
       component: () => import('@/features/admin/views/AdminView.vue'),
       meta: { requiresAuth: true, requiresStaff: true },
     },
+    {
+      path: '/workspaces',
+      name: 'workspaces',
+      component: () => import('@/features/workspaces/views/WorkspacesListView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/workspaces/:id',
+      name: 'workspace',
+      component: () => import('@/features/workspaces/views/WorkspaceView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

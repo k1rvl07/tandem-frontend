@@ -30,6 +30,12 @@ async function onLogout() {
 			</RouterLink>
 			<div class="flex items-center gap-4">
 				<RouterLink
+					to="/workspaces"
+					class="border border-neutral-300 bg-white px-3 py-2 text-neutral-900 hover:bg-neutral-100 focus:outline-none dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800"
+				>
+					Workspaces
+				</RouterLink>
+				<RouterLink
 					v-if="auth.user?.role === 'admin' || auth.user?.role === 'moderator'"
 					to="/admin"
 					class="border border-neutral-300 bg-white px-3 py-2 text-neutral-900 hover:bg-neutral-100 focus:outline-none dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800"
