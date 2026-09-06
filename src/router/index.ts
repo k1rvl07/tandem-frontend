@@ -6,7 +6,9 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/profile',
+      name: 'home',
+      component: () => import('@/features/home/views/HomeView.vue'),
+      meta: { requiresAuth: true },
     },
     {
       path: '/login',
@@ -27,22 +29,24 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresStaff: true },
     },
     {
-      path: '/workspaces',
-      name: 'workspaces',
-      component: () => import('@/features/workspaces/views/WorkspacesListView.vue'),
-      meta: { requiresAuth: true },
-    },
-    {
       path: '/workspaces/:id',
       name: 'workspace',
       component: () => import('@/features/workspaces/views/WorkspaceView.vue'),
       meta: { requiresAuth: true },
     },
     {
-      path: '/workspaces/:id/boards/:boardId',
-      name: 'board',
-      component: () => import('@/features/boards/views/BoardView.vue'),
+      path: '/invite/:token',
+      name: 'invite-join',
+      component: () => import('@/features/workspaces/views/JoinView.vue'),
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/workspaces/:id/boards/:boardId',
+      name: 'board-legacy',
+      redirect: (to) => ({
+        path: `/workspaces/${to.params.id}`,
+        query: { ...to.query, board: to.params.boardId },
+      }),
     },
   ],
 })
@@ -57,7 +61,7 @@ router.beforeEach((to) => {
     return { name: 'profile' }
   }
   if (to.meta.guestOnly && auth.isAuthenticated) {
-    return { name: 'profile' }
+    return { name: 'home' }
   }
   return true
 })
