@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { User } from 'lucide-vue-next'
 import { ref } from 'vue'
 import { imageUrl } from '@/api/files'
 
@@ -37,7 +38,7 @@ function onClick() {
 				alt="avatar"
 				class="h-full w-full object-cover"
 			/>
-			<span v-else>{{ '' }}</span>
+			<User v-else :size="40" stroke-width="1.25" class="text-blue-700 dark:text-blue-400" aria-hidden="true" />
 		</div>
 		<input
 			ref="fileInput"

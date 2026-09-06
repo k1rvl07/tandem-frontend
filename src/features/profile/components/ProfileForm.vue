@@ -50,6 +50,7 @@ function clearError(field: keyof UpdateProfileFormValues) {
 				id="display_name"
 				v-model="values.display_name"
 				type="text"
+				maxlength="50"
 				autocomplete="name"
 				class="border border-neutral-300 bg-white px-3 py-2 text-neutral-900 outline-none focus:border-blue-600 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-blue-400"
 				@input="clearError('display_name')"
@@ -64,7 +65,9 @@ function clearError(field: keyof UpdateProfileFormValues) {
 			<textarea
 				id="bio"
 				v-model="values.bio"
+				v-autosize
 				rows="3"
+				maxlength="400"
 				class="border border-neutral-300 bg-white px-3 py-2 text-neutral-900 outline-none focus:border-blue-600 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-blue-400"
 				@input="clearError('bio')"
 			></textarea>
