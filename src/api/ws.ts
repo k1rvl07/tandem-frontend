@@ -45,9 +45,7 @@ export class WSClient {
       try {
         const msg = JSON.parse(event.data) as WSMessage
         this.dispatch(msg)
-      } catch {
-        // ignore malformed frames
-      }
+      } catch {}
     }
 
     socket.onclose = () => {
