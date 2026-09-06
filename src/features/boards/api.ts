@@ -1,19 +1,21 @@
 import { http } from '@/api/http'
 import type {
+  ArchiveBoardRequest,
   Board,
   BoardDetail,
-  Column,
   CreateBoardRequest,
-  CreateColumnRequest,
   CreateTaskRequest,
+  ReorderBoardsRequest,
   Task,
+  TaskAttachment,
+  TaskDetail,
   UpdateBoardRequest,
-  UpdateColumnRequest,
   UpdateTaskRequest,
 } from '@/shared/types'
 
-export async function listBoards(workspaceId: string): Promise<Board[]> {
-  const res = await http.get<Board[]>(`/workspaces/${workspaceId}/boards`)
+export async function listBoards(workspaceId: string, includeArchived?: boolean): Promise<Board[]> {
+  const params = includeArchived ? { include_archived: '1' } : {}
+  const res = await http.get<Board[]>(`/workspaces/${workspaceId}/boards`, { params })
   return res.data
 }
 
@@ -39,41 +41,38 @@ export async function updateBoard(
   return res.data
 }
 
+export async function setMainBoard(workspaceId: string, boardId: string): Promise<Board> {
+  const res = await http.put<Board>(`/workspaces/${workspaceId}/boards/${boardId}/main`)
+  return res.data
+}
+
+export async function addBoardFavorite(boardId: string): Promise<void> {
+  await http.put(`/favorites/boards/${boardId}`)
+}
+
+export async function removeBoardFavorite(boardId: string): Promise<void> {
+  await http.delete(`/favorites/boards/${boardId}`)
+}
+
+export async function archiveBoard(
+  workspaceId: string,
+  boardId: string,
+  payload: ArchiveBoardRequest,
+): Promise<Board> {
+  const res = await http.put<Board>(`/workspaces/${workspaceId}/boards/${boardId}/archive`, payload)
+  return res.data
+}
+
+export async function reorderBoards(
+  workspaceId: string,
+  payload: ReorderBoardsRequest,
+): Promise<Board[]> {
+  const res = await http.put<Board[]>(`/workspaces/${workspaceId}/boards/reorder`, payload)
+  return res.data
+}
+
 export async function deleteBoard(workspaceId: string, boardId: string): Promise<void> {
   await http.delete(`/workspaces/${workspaceId}/boards/${boardId}`)
-}
-
-export async function createColumn(
-  workspaceId: string,
-  boardId: string,
-  payload: CreateColumnRequest,
-): Promise<Column> {
-  const res = await http.post<Column>(
-    `/workspaces/${workspaceId}/boards/${boardId}/columns`,
-    payload,
-  )
-  return res.data
-}
-
-export async function updateColumn(
-  workspaceId: string,
-  boardId: string,
-  columnId: string,
-  payload: UpdateColumnRequest,
-): Promise<Column> {
-  const res = await http.patch<Column>(
-    `/workspaces/${workspaceId}/boards/${boardId}/columns/${columnId}`,
-    payload,
-  )
-  return res.data
-}
-
-export async function deleteColumn(
-  workspaceId: string,
-  boardId: string,
-  columnId: string,
-): Promise<void> {
-  await http.delete(`/workspaces/${workspaceId}/boards/${boardId}/columns/${columnId}`)
 }
 
 export async function createTask(
@@ -104,4 +103,46 @@ export async function deleteTask(
   taskId: string,
 ): Promise<void> {
   await http.delete(`/workspaces/${workspaceId}/boards/${boardId}/tasks/${taskId}`)
+}
+
+export async function getTaskDetail(workspaceId: string, taskId: string): Promise<TaskDetail> {
+  const res = await http.get<TaskDetail>(`/workspaces/${workspaceId}/tasks/${taskId}`)
+  return res.data
+}
+
+export async function listWorkspaceTasks(workspaceId: string): Promise<Task[]> {
+  const res = await http.get<Task[]>(`/workspaces/${workspaceId}/tasks`)
+  return res.data
+}
+
+export async function listAttachments(
+  workspaceId: string,
+  taskId: string,
+): Promise<TaskAttachment[]> {
+  const res = await http.get<TaskAttachment[]>(
+    `/workspaces/${workspaceId}/tasks/${taskId}/attachments`,
+  )
+  return res.data
+}
+
+export async function createAttachment(
+  workspaceId: string,
+  taskId: string,
+  file: File,
+): Promise<TaskAttachment> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await http.post<TaskAttachment>(
+    `/workspaces/${workspaceId}/tasks/${taskId}/attachments`,
+    formData,
+  )
+  return res.data
+}
+
+export async function deleteAttachment(
+  workspaceId: string,
+  taskId: string,
+  attachmentId: string,
+): Promise<void> {
+  await http.delete(`/workspaces/${workspaceId}/tasks/${taskId}/attachments/${attachmentId}`)
 }
