@@ -1,6 +1,6 @@
 import { fileURLToPath, URL } from 'node:url'
 import vue from '@vitejs/plugin-vue'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   plugins: [vue()],
@@ -20,6 +20,17 @@ export default defineConfig({
         target: 'ws://localhost:8080',
         ws: true,
       },
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['src/test/setup.ts'],
+    exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**'],
+      exclude: ['**/*.test.ts', 'tests/**'],
+      reporter: ['text', 'html'],
     },
   },
 })
