@@ -11,6 +11,8 @@
       "src/**",
       "!src/styles",
       "tests/**",
+      "!tests/e2e/.auth",
+      "!tests/e2e/test-results",
       "vite.config.ts",
       "tailwind.config.js",
       "postcss.config.js"
