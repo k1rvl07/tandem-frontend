@@ -5,3 +5,7 @@ export async function login(payload: LoginRequest): Promise<LoginResponse> {
   const res = await http.post<LoginResponse>('/auth/login', payload)
   return res.data
 }
+
+export async function logout(): Promise<void> {
+  await http.post('/auth/logout')
+}

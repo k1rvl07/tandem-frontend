@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { extractError } from '@/shared/utils/error'
 import { useAuthStore } from '@/stores/auth'
 import LoginForm from '../components/LoginForm.vue'
 import type { LoginFormValues } from '../schema'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
@@ -17,7 +18,8 @@ async function onSubmit(values: LoginFormValues) {
   submitting.value = true
   try {
     await auth.login(values)
-    await router.push('/')
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+    await router.push(redirect)
   } catch (e) {
     error.value = extractError(e)
   } finally {

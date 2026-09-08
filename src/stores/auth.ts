@@ -8,6 +8,7 @@ import type {
   UpdateProfileRequest,
   User,
 } from '@/shared/types'
+import { isTokenUsable } from '@/shared/utils/jwt'
 
 const TOKEN_KEY = 'tandem_token'
 const USER_KEY = 'tandem_user'
@@ -16,7 +17,7 @@ export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const user = ref<User | null>(readStoredUser())
 
-  const isAuthenticated = computed(() => token.value !== null)
+  const isAuthenticated = computed(() => token.value !== null && isTokenUsable(token.value))
 
   async function login(payload: LoginRequest): Promise<void> {
     const res = await authApi.login(payload)
@@ -26,11 +27,16 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem(USER_KEY, JSON.stringify(res.user))
   }
 
-  function logout(): void {
+  function clearSession(): void {
     token.value = null
     user.value = null
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
+  }
+
+  function logout(): void {
+    authApi.logout().catch(() => undefined)
+    clearSession()
   }
 
   function setUser(updated: User): void {
@@ -57,7 +63,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function changePassword(payload: ChangePasswordRequest): Promise<void> {
-    await profileApi.changePassword(payload)
+    const next = await profileApi.changePassword(payload)
+    token.value = next
+    localStorage.setItem(TOKEN_KEY, next)
   }
 
   return {
@@ -66,6 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     login,
     logout,
+    clearSession,
     fetchProfile,
     updateProfile,
     uploadAvatar,

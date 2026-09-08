@@ -18,6 +18,7 @@ export async function uploadAvatar(file: File): Promise<User> {
   return res.data
 }
 
-export async function changePassword(payload: ChangePasswordRequest): Promise<void> {
-  await http.post('/me/password', payload)
+export async function changePassword(payload: ChangePasswordRequest): Promise<string> {
+  const res = await http.post<{ token: string }>('/me/password', payload)
+  return res.data.token
 }

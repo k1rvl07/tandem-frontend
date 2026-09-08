@@ -54,7 +54,7 @@ const router = createRouter({
 router.beforeEach((to) => {
   const auth = useAuthStore()
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    return { name: 'login' }
+    return { name: 'login', query: { redirect: to.fullPath } }
   }
   const role = auth.user?.role
   if (to.meta.requiresStaff && role !== 'admin' && role !== 'moderator') {
