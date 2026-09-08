@@ -9,10 +9,10 @@ export interface WSMessage {
 type MessageHandler = (msg: WSMessage) => void
 
 const TOKEN_KEY = 'tandem_token'
+const MAX_RECONNECT_ATTEMPTS = 5
 const wsUrl = () => {
-  const token = localStorage.getItem(TOKEN_KEY)
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${window.location.host}/ws?token=${encodeURIComponent(token ?? '')}`
+  return `${proto}://${window.location.host}/ws`
 }
 
 export class WSClient {
@@ -26,10 +26,17 @@ export class WSClient {
   readonly connected = ref(false)
 
   connect(): void {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)
+    ) {
       return
     }
-    const socket = new WebSocket(wsUrl())
+    if (!localStorage.getItem(TOKEN_KEY)) {
+      return
+    }
+    const token = localStorage.getItem(TOKEN_KEY) ?? ''
+    const socket = new WebSocket(wsUrl(), token ? ['tandem', token] : ['tandem'])
     this.socket = socket
 
     socket.onopen = () => {
@@ -49,10 +56,17 @@ export class WSClient {
     }
 
     socket.onclose = () => {
+      if (this.socket !== socket) {
+        return
+      }
       this.connected.value = false
       this.stopHeartbeat()
       if (this.reconnectTimer !== null) {
         window.clearTimeout(this.reconnectTimer)
+        this.reconnectTimer = null
+      }
+      if (!localStorage.getItem(TOKEN_KEY) || this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        return
       }
       const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 30000)
       this.reconnectAttempts += 1
@@ -67,9 +81,11 @@ export class WSClient {
     }
     this.rooms.clear()
     this.stopHeartbeat()
-    this.socket?.close()
-    this.socket = null
     this.connected.value = false
+    this.reconnectAttempts = 0
+    const socket = this.socket
+    this.socket = null
+    socket?.close()
   }
 
   join(room: string): void {
