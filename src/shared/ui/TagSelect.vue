@@ -32,7 +32,9 @@ const emit = defineEmits<(e: 'update:modelValue', value: string) => void>()
 const open = ref(false)
 const anchor = ref<HTMLButtonElement | null>(null)
 const menu = ref<HTMLDivElement | null>(null)
-const rect = reactive({ top: 0, left: 0, minWidth: 176, maxWidth: 384 })
+const rect = reactive({ top: 0, left: 0, minWidth: 176, maxWidth: 320 })
+
+const menuMaxWidth = 320
 
 const selectedLabel = computed(() => {
   if (!props.modelValue) {
@@ -41,48 +43,29 @@ const selectedLabel = computed(() => {
   return props.options.find((o) => o.value === props.modelValue)?.label ?? props.modelValue
 })
 
-function panelWidth(): number {
-  let cur = anchor.value?.parentElement
-  while (cur) {
-    if (getComputedStyle(cur).position === 'fixed') {
-      break
-    }
-    cur = cur.parentElement
-  }
-  if (!cur) {
-    return 0
-  }
-  const panel = cur.firstElementChild as HTMLElement | null
-  const width = panel?.getBoundingClientRect().width ?? 0
-  return width > 0 ? width : 0
-}
-
 function positionMenu() {
   const el = anchor.value
   if (!el) {
     return
   }
   const r = el.getBoundingClientRect()
-  const panelW = panelWidth()
-  const maxWidth =
-    panelW > 0 ? Math.min(panelW, window.innerWidth - 8) : Math.min(384, window.innerWidth - 8)
-  const minWidth = Math.min(maxWidth, Math.max(r.width, 176))
-  const menuHeight = menu.value?.offsetHeight ?? 240
-  let left = r.left
-  if (left + maxWidth > window.innerWidth - 8) {
-    left = Math.max(8, window.innerWidth - maxWidth - 8)
-  }
+  const menuW = Math.min(Math.max(menu.value?.offsetWidth ?? 176, 176), menuMaxWidth)
+  const menuH = menu.value?.offsetHeight ?? 240
+  let left = r.right - menuW
   if (left < 8) {
     left = 8
   }
-  if (r.bottom + 4 + menuHeight > window.innerHeight - 8) {
-    rect.top = Math.max(8, r.top - menuHeight - 4)
-  } else {
-    rect.top = r.bottom + 4
+  if (left + menuW > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - menuW - 8)
   }
+  let top = r.bottom + 4
+  if (top + menuH > window.innerHeight - 8) {
+    top = Math.max(8, r.top - menuH - 4)
+  }
+  rect.top = top
   rect.left = left
-  rect.minWidth = minWidth
-  rect.maxWidth = maxWidth
+  rect.minWidth = menuW
+  rect.maxWidth = menuW
 }
 
 function toggle() {

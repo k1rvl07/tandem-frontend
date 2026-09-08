@@ -2,8 +2,8 @@
 import { User } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { imageUrl } from '@/api/files'
 import { useWS } from '@/api/ws'
+import SignedImage from '@/shared/ui/SignedImage.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const props = withDefaults(defineProps<{ withName?: boolean }>(), { withName: false })
@@ -43,6 +43,7 @@ function onAdmin() {
 async function onLogout() {
   open.value = false
   auth.logout()
+  ws.disconnect()
   await router.push('/login')
 }
 </script>
@@ -55,9 +56,9 @@ async function onLogout() {
 			@click="open = !open"
 		>
 			<span class="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-neutral-300 bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800">
-				<img
+				<SignedImage
 					v-if="auth.user?.avatar_key"
-					:src="imageUrl(auth.user.avatar_key)"
+					:src="auth.user.avatar_key"
 					alt="avatar"
 					class="h-full w-full object-cover"
 				/>

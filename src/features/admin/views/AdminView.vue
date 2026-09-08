@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowLeft } from 'lucide-vue-next'
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { User, UserRole } from '@/shared/types'
@@ -25,7 +26,9 @@ const creating = ref(false)
 const loading = ref(false)
 const loadingMore = ref(false)
 const scrollRef = ref<HTMLElement | null>(null)
-let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchTimer: number | null = null
+let reqId = 0
+const roleSeqs = new Map<string, number>()
 
 const hasMore = () => users.value.length < total.value
 
@@ -33,7 +36,8 @@ const actorId = auth.user?.id ?? ''
 const actorRole = auth.user?.role ?? 'user'
 const isAdmin = actorRole === 'admin'
 
-const availableRoles: UserRole[] = actorRole === 'admin' ? ['user', 'moderator'] : ['user']
+const availableRoles: Array<'moderator' | 'user'> =
+  actorRole === 'admin' ? ['user', 'moderator'] : ['user']
 const roleOptions = availableRoles.map((role) => ({ label: role, value: role }))
 
 const values = reactive<CreateUserFormValues>({
@@ -54,20 +58,31 @@ async function load() {
   } else {
     loadingMore.value = true
   }
+  const id = ++reqId
   loadError.value = null
   try {
     const res = await listUsers(page.value, pageSize, q.value)
+    if (id !== reqId) {
+      return
+    }
     total.value = res.total
     users.value = page.value === 1 ? res.items : [...users.value, ...res.items]
   } catch (e) {
-    loadError.value = extractError(e)
+    if (id === reqId) {
+      loadError.value = extractError(e)
+    }
   } finally {
-    loading.value = false
-    loadingMore.value = false
+    if (id === reqId) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 
 function reset() {
+  reqId += 1
+  loading.value = false
+  loadingMore.value = false
   users.value = []
   total.value = 0
   page.value = 1
@@ -135,11 +150,17 @@ async function onDelete(user: User) {
 
 async function onRoleChange(user: User, role: UserRole) {
   actionError.value = null
+  const seq = (roleSeqs.get(user.id) ?? 0) + 1
+  roleSeqs.set(user.id, seq)
   try {
     const updated = await updateUserRole(user.id, role)
-    user.role = updated.role
+    if (roleSeqs.get(user.id) === seq) {
+      user.role = updated.role
+    }
   } catch (e) {
-    actionError.value = extractError(e)
+    if (roleSeqs.get(user.id) === seq) {
+      actionError.value = extractError(e)
+    }
   }
 }
 
@@ -175,15 +196,21 @@ onBeforeUnmount(() => {
 
 <template>
 	<div class="px-3 py-4 sm:px-4 md:px-6">
-		<div class="mb-6 flex items-center justify-between">
-			<h1 class="text-xl text-neutral-900 dark:text-neutral-100">Admin panel</h1>
-			<button
-				type="button"
-				class="border border-neutral-300 px-4 py-2 text-neutral-900 hover:bg-neutral-100 focus:outline-none dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-800"
-				@click="router.push('/')"
-			>
-				Back
-			</button>
+		<div class="mb-6 flex items-center">
+			<div class="flex w-1/3 items-center justify-start">
+				<button
+					type="button"
+					class="flex h-9 w-9 items-center justify-center border border-neutral-300 text-neutral-900 hover:bg-neutral-100 focus:outline-none dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-800"
+					aria-label="Back to home"
+					@click="router.push('/')"
+				>
+					<ArrowLeft class="h-4 w-4" />
+				</button>
+			</div>
+			<div class="flex w-1/3 items-center justify-center">
+				<h1 class="text-xl text-neutral-900 dark:text-neutral-100">Admin panel</h1>
+			</div>
+			<div class="flex w-1/3 items-center justify-end"></div>
 		</div>
 
 		<div class="flex flex-col gap-6">
@@ -227,9 +254,9 @@ onBeforeUnmount(() => {
 						<input
 							id="password"
 							v-model="values.password"
-							type="text"
+							type="password"
 							maxlength="72"
-							autocomplete="off"
+							autocomplete="new-password"
 							class="border border-neutral-300 bg-white px-3 py-2 text-neutral-900 outline-none focus:border-blue-600 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100 dark:focus:border-blue-400"
 							@input="clearError('password')"
 						/>
@@ -302,7 +329,7 @@ onBeforeUnmount(() => {
 										:options="roleOptions"
 										compact
 										value-max-w="max-w-36"
-										@update:model-value="(role) => onRoleChange(user, role)"
+										@update:model-value="(role) => onRoleChange(user, role as UserRole)"
 									/>
 									<span v-else class="whitespace-nowrap">{{ user.role }}</span>
 								</td>

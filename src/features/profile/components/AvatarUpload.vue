@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { User } from 'lucide-vue-next'
 import { ref } from 'vue'
-import { imageUrl } from '@/api/files'
+import SignedImage from '@/shared/ui/SignedImage.vue'
 
 const props = defineProps<{
   avatarKey: string
@@ -32,9 +32,9 @@ function onClick() {
 		<div
 			class="flex h-20 w-20 items-center justify-center border border-neutral-300 bg-neutral-100 text-2xl font-semibold text-neutral-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
 		>
-			<img
+<SignedImage
 				v-if="props.avatarKey"
-				:src="imageUrl(props.avatarKey)"
+				:src="props.avatarKey"
 				alt="avatar"
 				class="h-full w-full object-cover"
 			/>

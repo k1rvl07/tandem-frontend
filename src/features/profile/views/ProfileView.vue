@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { ArrowLeft } from 'lucide-vue-next'
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { extractError } from '@/shared/utils/error'
 import { useAuthStore } from '@/stores/auth'
 import AvatarUpload from '../components/AvatarUpload.vue'
@@ -8,6 +10,7 @@ import ProfileForm from '../components/ProfileForm.vue'
 import type { ChangePasswordFormValues, UpdateProfileFormValues } from '../schema'
 
 const auth = useAuthStore()
+const router = useRouter()
 
 const profileError = ref<string | null>(null)
 const profileSaved = ref(false)
@@ -63,8 +66,23 @@ async function onChangePassword(values: ChangePasswordFormValues) {
 </script>
 
 <template>
-	<div class="mx-auto max-w-2xl px-4 py-8">
-		<h1 class="mb-6 text-xl text-neutral-900 dark:text-neutral-100">Profile</h1>
+	<div class="px-3 py-4 sm:px-4 md:px-6">
+		<div class="mb-6 flex items-center">
+			<div class="flex w-1/3 items-center justify-start">
+				<button
+					type="button"
+					class="flex h-9 w-9 items-center justify-center border border-neutral-300 text-neutral-900 hover:bg-neutral-100 focus:outline-none dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-800"
+					aria-label="Back to home"
+					@click="router.push('/')"
+				>
+					<ArrowLeft class="h-4 w-4" />
+				</button>
+			</div>
+			<div class="flex w-1/3 items-center justify-center">
+				<h1 class="text-xl text-neutral-900 dark:text-neutral-100">Profile</h1>
+			</div>
+			<div class="flex w-1/3 items-center justify-end"></div>
+		</div>
 
 		<div class="flex flex-col gap-6">
 			<section class="flex items-center gap-4 border border-neutral-300 bg-white p-6 dark:border-neutral-700 dark:bg-neutral-900">
