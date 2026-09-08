@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const addableRoles = ['editor', 'viewer'] as const
+export const addableRoles = ['editor', 'member'] as const
 
 export const workspaceFormSchema = z.object({
   name: z.string().trim().min(1, 'name is required').max(80, 'name must be at most 80 characters'),
@@ -18,7 +18,7 @@ export const workspaceFormSchema = z.object({
 
 export const addMemberSchema = z.object({
   login: z.string().trim().min(1, 'login is required'),
-  role: z.enum(addableRoles).default('viewer'),
+  role: z.enum(addableRoles).default('member'),
 })
 
 export type WorkspaceFormValues = z.infer<typeof workspaceFormSchema>

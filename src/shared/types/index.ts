@@ -42,7 +42,7 @@ export interface ChangePasswordRequest {
   current_password: string
 }
 
-export type WorkspaceRole = 'owner' | 'editor' | 'viewer'
+export type WorkspaceRole = 'owner' | 'editor' | 'member'
 
 export interface Workspace {
   id: string
@@ -110,6 +110,7 @@ export interface TransferOwnerRequest {
 
 export interface WorkspaceInvite {
   invite_token: string | null
+  expires_at?: string | null
 }
 
 export interface Board {
@@ -118,16 +119,10 @@ export interface Board {
   name: string
   position: number
   is_main: boolean
-  archived: boolean
   is_favorite: boolean
   task_count: number
   created_at: string
   updated_at: string
-  archived_at: string | null
-}
-
-export interface ArchiveBoardRequest {
-  archived: boolean
 }
 
 export interface ReorderBoardsRequest {
@@ -160,7 +155,6 @@ export interface Task {
   is_urgent: boolean
   is_hidden: boolean
   image_key: string
-  archived_at: string | null
   created_at: string
   updated_at: string
 }
@@ -175,6 +169,7 @@ export interface TaskReference {
   column_id: string
   column_name: string
   is_urgent: boolean
+  is_hidden: boolean
 }
 
 export interface TaskDetail extends Task {
@@ -199,11 +194,9 @@ export interface BoardDetail {
   name: string
   position: number
   is_main: boolean
-  archived: boolean
   columns: Column[]
   created_at: string
   updated_at: string
-  archived_at: string | null
 }
 
 export interface CreateBoardRequest {
@@ -224,6 +217,7 @@ export interface CreateTaskRequest {
   due_date?: string
   is_urgent?: boolean
   is_hidden?: boolean
+  image_key?: string
 }
 
 export interface UpdateTaskRequest {
@@ -239,7 +233,6 @@ export interface UpdateTaskRequest {
   is_urgent?: boolean
   is_hidden?: boolean
   image_key?: string
-  archived?: boolean
 }
 
 export interface TaskAttachment {

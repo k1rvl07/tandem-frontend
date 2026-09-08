@@ -11,9 +11,9 @@ import {
   User,
   X,
 } from 'lucide-vue-next'
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
-import { imageUrl, uploadImage } from '@/api/files'
+import { uploadImage } from '@/api/files'
 import { http } from '@/api/http'
 import { useWS } from '@/api/ws'
 import { getWorkspace } from '@/features/workspaces/api'
@@ -26,6 +26,7 @@ import type {
   WorkspaceDetail,
   WorkspaceMember,
 } from '@/shared/types'
+import SignedImage from '@/shared/ui/SignedImage.vue'
 import TagCheck from '@/shared/ui/TagCheck.vue'
 import TagSelect from '@/shared/ui/TagSelect.vue'
 import { extractError } from '@/shared/utils/error'
@@ -35,6 +36,7 @@ import {
   createAttachment,
   createTask,
   deleteAttachment,
+  deleteTask,
   getBoard,
   getTaskDetail,
   listAttachments,
@@ -55,8 +57,8 @@ const props = defineProps<{
 const emit = defineEmits<(e: 'task-counts', counts: Record<string, number>) => void>()
 
 interface DragEndEvent {
-  oldIndex: number
-  newIndex: number
+  oldIndex?: number
+  newIndex?: number
   from: HTMLElement
   to: HTMLElement
   item: HTMLElement
@@ -79,7 +81,7 @@ const canEdit = computed(
   () =>
     workspace.value?.role === 'owner' ||
     workspace.value?.role === 'editor' ||
-    workspace.value?.role === 'viewer',
+    workspace.value?.role === 'member',
 )
 
 const memberById = computed(() => {
@@ -118,7 +120,7 @@ const filteredColumns = computed(() => {
 const childrenByParent = computed(() => {
   const map = new Map<string, Task[]>()
   for (const t of workspaceTasks.value) {
-    if (!t.parent_id || t.archived_at != null) {
+    if (!t.parent_id) {
       continue
     }
     const list = map.get(t.parent_id) ?? []
@@ -178,6 +180,7 @@ const boardName = ref('')
 
 const editorOpen = ref(false)
 const editingTaskId = ref<string | null>(null)
+const titleInput = ref<HTMLInputElement | null>(null)
 const taskForm = reactive<TaskFormValues>({
   title: '',
   description: '',
@@ -201,7 +204,17 @@ const columnOptions = ref<Column[]>([])
 const parentOptions = ref<Task[]>([])
 const attachments = ref<TaskAttachment[]>([])
 const attachmentBlobs = reactive<Record<string, string>>({})
+const pendingAttachments = ref<{ file: File; url: string }[]>([])
 const workspaceTasks = ref<Task[]>([])
+
+function clearPendingAttachments() {
+  for (const item of pendingAttachments.value) {
+    if (item.url) {
+      URL.revokeObjectURL(item.url)
+    }
+  }
+  pendingAttachments.value = []
+}
 
 function revokeAttachmentBlobs() {
   for (const url of Object.values(attachmentBlobs)) {
@@ -497,10 +510,6 @@ function applyUpdated(task: Task) {
     emit('task-counts', boardTaskCount())
     return
   }
-  if (task.archived_at) {
-    emit('task-counts', boardTaskCount())
-    return
-  }
   const col = columns.value.find((c) => c.id === task.column_id)
   if (col && !col.tasks.some((t) => t.id === task.id)) {
     insertTask(col.tasks, task)
@@ -695,6 +704,7 @@ async function openCreate(columnId?: string) {
   taskDetail.value = null
   currentBoardId.value = props.boardId ?? ''
   attachments.value = []
+  clearPendingAttachments()
   menuOpen.value = false
   resetForm()
   await Promise.all([loadBoards(), loadBoardColumns(taskForm.board_id), loadParentOptions(null)])
@@ -706,6 +716,7 @@ defineExpose({ openCreate })
 
 async function openEdit(task: { id: string }) {
   attachments.value = []
+  clearPendingAttachments()
   menuOpen.value = false
   taskValidation.value = {}
   try {
@@ -767,6 +778,7 @@ async function duplicateTask() {
   menuOpen.value = false
   editingTaskId.value = null
   attachments.value = []
+  clearPendingAttachments()
   taskForm.title = src.title
   taskForm.description = src.description
   taskForm.assignee_id = src.assignee?.id ?? ''
@@ -790,6 +802,7 @@ async function createSubtask() {
   menuOpen.value = false
   editingTaskId.value = null
   attachments.value = []
+  clearPendingAttachments()
   resetForm()
   taskForm.parent_id = parentId
   await Promise.all([loadBoards(), loadBoardColumns(taskForm.board_id), loadParentOptions(null)])
@@ -847,7 +860,10 @@ async function onSaveTask() {
       } else {
         const updated = await updateTask(props.workspaceId, targetBoardId, editingTaskId.value, {
           ...data,
-          column_id: data.column_id ?? undefined,
+          column_id:
+            data.column_id && data.column_id !== taskDetail.value?.column_id
+              ? data.column_id
+              : undefined,
           board_id: undefined,
           position: undefined,
         })
@@ -868,7 +884,26 @@ async function onSaveTask() {
         due_date: data.due_date,
         is_urgent: data.is_urgent,
         is_hidden: data.is_hidden,
+        image_key: data.image_key,
       })
+      const pending = pendingAttachments.value
+      clearPendingAttachments()
+      if (pending.length) {
+        const failed: string[] = []
+        for (const item of pending) {
+          try {
+            await createAttachment(props.workspaceId, created.id, item.file)
+          } catch {
+            failed.push(item.file.name)
+          }
+          if (item.url) {
+            URL.revokeObjectURL(item.url)
+          }
+        }
+        if (failed.length) {
+          actionError.value = `Task created, but attachment upload failed: ${failed.join(', ')}`
+        }
+      }
       applyCreated(created)
     }
     editorOpen.value = false
@@ -885,19 +920,36 @@ async function onAttachmentFile(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (!file || attachmentUploading.value || !editingTaskId.value) {
+  if (!file || attachmentUploading.value) {
+    return
+  }
+  if (!editingTaskId.value) {
+    pendingAttachments.value.push({
+      file,
+      url: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+    })
     return
   }
   attachmentUploading.value = true
   try {
     const created = await createAttachment(props.workspaceId, editingTaskId.value, file)
-    attachments.value.push(created)
-    await hydrateAttachmentBlobs([created])
+    if (!attachments.value.some((a) => a.id === created.id)) {
+      attachments.value.push(created)
+      await hydrateAttachmentBlobs([created])
+    }
   } catch (e) {
     actionError.value = extractError(e)
   } finally {
     attachmentUploading.value = false
   }
+}
+
+function removePendingAttachment(index: number) {
+  const item = pendingAttachments.value[index]
+  if (item?.url) {
+    URL.revokeObjectURL(item.url)
+  }
+  pendingAttachments.value.splice(index, 1)
 }
 
 async function removeAttachment(attachment: TaskAttachment) {
@@ -942,15 +994,18 @@ function clearCover() {
   taskForm.image_key = ''
 }
 
-async function archiveTask() {
+async function deleteTaskAction() {
   if (!editingTaskId.value) {
+    return
+  }
+  if (
+    !window.confirm(`Delete task ${taskDetail.value?.display_id ?? ''}? This cannot be undone.`)
+  ) {
     return
   }
   menuOpen.value = false
   try {
-    await updateTask(props.workspaceId, currentBoardId.value, editingTaskId.value, {
-      archived: true,
-    })
+    await deleteTask(props.workspaceId, currentBoardId.value, editingTaskId.value)
     editorOpen.value = false
     await load()
   } catch (e) {
@@ -981,7 +1036,7 @@ async function onDragEnd(evt: DragEndEvent) {
   try {
     const updated = await updateTask(props.workspaceId, props.boardId, taskId, {
       column_id: targetColumnId,
-      position: evt.newIndex,
+      position: evt.newIndex ?? 0,
     })
     applyUpdated(updated)
   } catch (e) {
@@ -1055,8 +1110,15 @@ const onlineLabel = computed(() => {
 function closeEditor() {
   editorOpen.value = false
   menuOpen.value = false
+  clearPendingAttachments()
   revokeAttachmentBlobs()
 }
+
+watch(editorOpen, (open) => {
+  if (open) {
+    void nextTick(() => titleInput.value?.focus())
+  }
+})
 </script>
 
 <template>
@@ -1112,21 +1174,25 @@ function closeEditor() {
 								:key="task.id"
 								:data-task-id="task.id"
 								class="relative cursor-pointer border border-neutral-300 bg-white dark:border-neutral-600 dark:bg-neutral-900"
+								:class="{ 'opacity-60': task.is_hidden }"
 								@click="canEdit && openEdit(task)"
 							>
 								<span
 									v-if="task.is_urgent"
 									class="pointer-events-none absolute left-1/2 top-1 z-10 h-[3px] w-[25%] max-w-24 -translate-x-1/2 bg-blue-700 dark:bg-blue-400"
 								/>
-								<img
+								<SignedImage
 									v-if="task.image_key"
-									:src="imageUrl(task.image_key)"
+									:src="task.image_key"
 									:alt="task.title"
 									class="mb-2 aspect-video w-full object-cover"
 								/>
 								<div class="p-2">
 									<div class="flex items-start justify-between gap-1">
-										<p class="line-clamp-2 break-words text-sm font-medium text-neutral-900 dark:text-neutral-100">{{ task.title }}</p>
+										<p
+											class="line-clamp-2 break-words text-sm font-medium text-neutral-900 dark:text-neutral-100"
+											:class="task.is_hidden ? 'line-through' : ''"
+										>{{ task.title }}</p>
 									</div>
 									<p
 										v-if="task.due_date"
@@ -1142,9 +1208,9 @@ function closeEditor() {
 											v-if="task.assignee"
 											class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden border border-neutral-300 bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800"
 										>
-											<img
+											<SignedImage
 												v-if="task.assignee.avatar_key"
-												:src="imageUrl(task.assignee.avatar_key)"
+												:src="task.assignee.avatar_key"
 												alt="avatar"
 												class="h-full w-full object-cover"
 											/>
@@ -1217,7 +1283,7 @@ function closeEditor() {
 			This board has no columns.
 		</p>
 
-		<div v-if="editorOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4" @click.self="closeEditor">
+		<div v-if="editorOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4" @click.self="closeEditor" @keydown.esc="closeEditor">
 			<form class="relative flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col border border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-900" novalidate @submit.prevent="onSaveTask">
 				<div class="flex items-center justify-between border-b border-neutral-300 px-6 py-3 dark:border-neutral-700">
 					<span class="text-sm font-medium text-neutral-900 dark:text-neutral-100">
@@ -1242,8 +1308,8 @@ function closeEditor() {
 								<button type="button" class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-neutral-900 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800" @click="duplicateTask">
 									Duplicate task
 								</button>
-								<button type="button" class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-neutral-900 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800" @click="archiveTask">
-									Archive
+								<button type="button" class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-neutral-900 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800" @click="deleteTaskAction">
+									Delete task
 								</button>
 							</div>
 						</div>
@@ -1263,6 +1329,7 @@ function closeEditor() {
 						<label for="task_title" class="text-sm">Title</label>
 						<input
 							id="task_title"
+							ref="titleInput"
 							v-model="taskForm.title"
 							type="text"
 							maxlength="120"
@@ -1272,13 +1339,13 @@ function closeEditor() {
 						<p v-if="taskValidation.title" class="text-sm text-blue-700 dark:text-blue-400">{{ taskValidation.title }}</p>
 					</div>
 
-					<div v-if="editingTaskId" class="flex flex-col gap-1">
+					<div class="flex flex-col gap-1">
 						<div class="flex items-center justify-between">
 							<span class="text-sm">Cover image</span>
 							<div class="flex items-center gap-2">
 								<button
 									type="button"
-									class="flex items-center gap-1 text-sm text-blue-700 hover:text-blue-800 disabled:opacity-50 dark:text-blue-400 dark:hover:text-blue-300"
+									class="flex items-center gap-1 text-sm text-blue-700 hover:text-blue-800 disabled:opacity-50 dark:text-blue-400 dark:hover:text-blue-400"
 									:disabled="coverUploading"
 									@click="onPickCover"
 								>
@@ -1296,8 +1363,8 @@ function closeEditor() {
 							</div>
 						</div>
 						<div v-if="taskForm.image_key" class="border border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/40">
-							<img
-								:src="imageUrl(taskForm.image_key)"
+							<SignedImage
+								:src="taskForm.image_key"
 								alt="cover"
 								class="aspect-video w-full object-cover"
 							/>
@@ -1448,7 +1515,7 @@ function closeEditor() {
 						<p v-if="taskValidation.description" class="text-sm text-blue-700 dark:text-blue-400">{{ taskValidation.description }}</p>
 					</div>
 
-					<div v-if="editingTaskId" class="flex flex-col gap-1">
+					<div class="flex flex-col gap-1">
 						<span class="text-sm">Attachments</span>
 						<div class="grid grid-cols-[repeat(auto-fill,minmax(6rem,1fr))] gap-3">
 							<a
@@ -1459,12 +1526,18 @@ function closeEditor() {
 								rel="noopener noreferrer"
 								class="group relative aspect-square border border-neutral-300 bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800"
 							>
-								<img
-									v-if="a.content_type.startsWith('image/')"
-									:src="attachmentBlobs[a.id] || a.url"
-									:alt="a.filename"
-									class="absolute inset-0 h-full w-full object-cover"
-								/>
+								<template v-if="a.content_type.startsWith('image/')">
+									<img
+										v-if="attachmentBlobs[a.id]"
+										:src="attachmentBlobs[a.id]"
+										:alt="a.filename"
+										class="absolute inset-0 h-full w-full object-cover"
+									/>
+									<div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2">
+										<File class="h-6 w-6 shrink-0 text-neutral-500 dark:text-neutral-400" />
+										<span class="w-full truncate text-center text-xs text-neutral-600 dark:text-neutral-400">{{ a.filename }}</span>
+									</div>
+								</template>
 								<div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2">
 									<File class="h-6 w-6 shrink-0 text-neutral-500 dark:text-neutral-400" />
 									<span class="w-full truncate text-center text-xs text-neutral-600 dark:text-neutral-400">{{ a.filename }}</span>
@@ -1478,6 +1551,30 @@ function closeEditor() {
 									<X class="h-3.5 w-3.5" />
 								</button>
 							</a>
+							<div
+								v-for="(p, i) in pendingAttachments"
+								:key="i"
+								class="group relative aspect-square border border-dashed border-neutral-400 bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800"
+							>
+								<img
+									v-if="p.url"
+									:src="p.url"
+									:alt="p.file.name"
+									class="absolute inset-0 h-full w-full object-cover"
+								/>
+								<div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2">
+									<File class="h-6 w-6 shrink-0 text-neutral-500 dark:text-neutral-400" />
+									<span class="w-full truncate text-center text-xs text-neutral-600 dark:text-neutral-400">{{ p.file.name }}</span>
+								</div>
+								<button
+									type="button"
+									class="absolute right-1 top-1 flex h-6 w-6 items-center justify-center border border-neutral-300 bg-white text-neutral-600 transition-opacity hover:bg-neutral-100 focus:opacity-100 group-hover:opacity-100 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+									aria-label="Remove attachment"
+									@click.prevent.stop="removePendingAttachment(i)"
+								>
+									<X class="h-3.5 w-3.5" />
+								</button>
+							</div>
 							<button
 								type="button"
 								class="flex aspect-square items-center justify-center border border-dashed border-neutral-300 text-neutral-500 hover:border-blue-600 hover:text-blue-700 focus:outline-none disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-400 dark:hover:border-blue-400 dark:hover:text-blue-400"
@@ -1504,6 +1601,7 @@ function closeEditor() {
 								<button
 									type="button"
 									class="flex w-full items-center gap-1.5 px-2 py-1.5 pr-3 text-left text-xs focus:outline-none"
+									:class="{ 'opacity-60': st.is_hidden }"
 									@click="openEdit(st)"
 								>
 									<span v-if="st.board_id !== currentBoardId" class="max-w-[7rem] shrink-0 truncate font-medium text-neutral-900 dark:text-neutral-100">{{
@@ -1512,7 +1610,7 @@ function closeEditor() {
 									<span v-if="st.board_id !== currentBoardId" class="shrink-0 text-neutral-400 dark:text-neutral-500">&gt;</span>
 									<span class="shrink-0 font-medium tabular-nums text-neutral-900 dark:text-neutral-100">{{ st.display_id }}</span>
 									<Flame v-if="st.is_urgent" :size="12" class="shrink-0 text-blue-700 dark:text-blue-400" aria-hidden="true" />
-									<span class="truncate text-neutral-600 dark:text-neutral-300">{{ st.title }}</span>
+									<span class="truncate text-neutral-600 dark:text-neutral-300" :class="st.is_hidden ? 'line-through' : ''">{{ st.title }}</span>
 									<span class="ml-auto px-1" :class="columnChipClass(st.board_id, st.column_id)">{{ st.column_name }}</span>
 								</button>
 								<div

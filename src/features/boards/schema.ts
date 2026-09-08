@@ -13,20 +13,20 @@ export const taskFormSchema = z.object({
     .min(1, 'title is required')
     .max(120, 'title must be at most 120 characters'),
   description: z.string().trim().max(1500, 'description must be at most 1500 characters'),
-  assignee_id: z.string().optional(),
-  curator_id: z.string().optional(),
-  parent_id: z.string().optional(),
-  board_id: z.string().optional(),
-  column_id: z.string().optional(),
-  is_urgent: z.boolean().optional(),
-  is_hidden: z.boolean().optional(),
-  image_key: z.string().optional(),
+  assignee_id: z.string().default(''),
+  curator_id: z.string().default(''),
+  parent_id: z.string().default(''),
+  board_id: z.string().default(''),
+  column_id: z.string().default(''),
+  is_urgent: z.boolean().default(false),
+  is_hidden: z.boolean().default(false),
+  image_key: z.string().default(''),
   due_date: z
     .string()
     .trim()
     .regex(datePattern, 'due date must be in YYYY-MM-DD format')
     .or(z.literal(''))
-    .optional(),
+    .default(''),
 })
 
 export type BoardFormValues = z.infer<typeof boardFormSchema>

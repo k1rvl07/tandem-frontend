@@ -2,7 +2,6 @@
 import { Flame, Palette, User, X } from 'lucide-vue-next'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { imageUrl } from '@/api/files'
 import { useWS } from '@/api/ws'
 import {
   addWorkspaceFavorite,
@@ -14,6 +13,7 @@ import { type WorkspaceFormValues, workspaceFormSchema } from '@/features/worksp
 import { ACCENT_PRESETS, DEFAULT_ACCENT, useTheme } from '@/shared/composables/useTheme'
 import type { Board, Task, TaskTreeQuery, TreeWorkspace, Workspace } from '@/shared/types'
 import ProfileMenu from '@/shared/ui/ProfileMenu.vue'
+import SignedImage from '@/shared/ui/SignedImage.vue'
 import { extractError } from '@/shared/utils/error'
 import { collectErrors } from '@/shared/utils/validation'
 import { getTaskTree } from '../api/tree'
@@ -55,6 +55,7 @@ const realtimeEvents: string[] = [
 const joinedRooms = new Set<string>()
 const unsubscribes: Array<() => void> = []
 let realtimeTimer: number | null = null
+let disposed = false
 
 const sortedWorkspaces = computed(() =>
   [...workspaces.value].sort((a, b) => Number(b.is_favorite) - Number(a.is_favorite)),
@@ -101,6 +102,7 @@ onMounted(() => {
   document.addEventListener('click', onDocumentClick)
   ws.connect()
   load().then(() => {
+    if (disposed) return
     for (const type of realtimeEvents) {
       unsubscribes.push(ws.on(type, (msg) => onRealtimeEvent(msg.type)))
     }
@@ -109,17 +111,20 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
   document.removeEventListener('click', onDocumentClick)
   for (const unsubscribe of unsubscribes) {
     unsubscribe()
   }
   unsubscribes.length = 0
+  for (const room of joinedRooms) {
+    ws.leave(room)
+  }
   joinedRooms.clear()
   if (realtimeTimer !== null) {
     window.clearTimeout(realtimeTimer)
     realtimeTimer = null
   }
-  ws.disconnect()
 })
 
 async function load() {
@@ -135,11 +140,17 @@ async function load() {
 }
 
 function reconcileRooms() {
-  for (const w of workspaces.value) {
-    const room = `workspace:${w.id}`
+  const wanted = new Set(workspaces.value.map((w) => `workspace:${w.id}`))
+  for (const room of wanted) {
     if (!joinedRooms.has(room)) {
       joinedRooms.add(room)
       ws.join(room)
+    }
+  }
+  for (const room of joinedRooms) {
+    if (!wanted.has(room)) {
+      joinedRooms.delete(room)
+      ws.leave(room)
     }
   }
 }
@@ -150,7 +161,9 @@ function onRealtimeEvent(_type: string) {
   }
   realtimeTimer = window.setTimeout(() => {
     realtimeTimer = null
+    if (disposed) return
     void load().then(() => {
+      if (disposed) return
       reconcileRooms()
       if (tasksOpen.value) {
         void loadTree(true)
@@ -160,14 +173,14 @@ function onRealtimeEvent(_type: string) {
 }
 
 watch(ws.connected, (connected: boolean) => {
-  if (connected) {
-    void load().then(() => {
-      reconcileRooms()
-      if (tasksOpen.value) {
-        void loadTree(true)
-      }
-    })
-  }
+  if (!connected || disposed) return
+  void load().then(() => {
+    if (disposed) return
+    reconcileRooms()
+    if (tasksOpen.value) {
+      void loadTree(true)
+    }
+  })
 })
 
 let treeSeq = 0
@@ -341,15 +354,20 @@ function clearCreateError(field: keyof WorkspaceFormValues) {
 		</div>
 
 <main class="flex-1 px-3 py-4 sm:px-4 md:px-6">
-			<div class="mb-5 flex items-center justify-between">
-				<h1 class="text-xl text-neutral-900 dark:text-neutral-100">All workspaces</h1>
-				<button
-					type="button"
-					class="bg-blue-700 px-4 py-2 text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-neutral-900"
-					@click="openCreate"
-				>
-					Create workspace
-				</button>
+			<div class="mb-5 flex items-center">
+				<div class="flex w-1/3 items-center justify-start"></div>
+				<div class="flex w-1/3 items-center justify-center">
+					<h1 class="text-xl text-neutral-900 dark:text-neutral-100">All workspaces</h1>
+				</div>
+				<div class="flex w-1/3 items-center justify-end">
+					<button
+						type="button"
+						class="bg-blue-700 px-4 py-2 text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-neutral-900"
+						@click="openCreate"
+					>
+						Create workspace
+					</button>
+				</div>
 			</div>
 
 			<p v-if="loadError" class="mb-4 text-sm text-blue-700 dark:text-blue-400">{{ loadError }}</p>
@@ -384,9 +402,9 @@ function clearCreateError(field: keyof WorkspaceFormValues) {
 						<div class="mt-auto flex w-full items-center justify-between gap-2">
 							<span class="flex min-w-0 items-center gap-2">
 								<span class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden border border-neutral-300 bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800">
-									<img
+									<SignedImage
 										v-if="ws.owner?.avatar_key"
-										:src="imageUrl(ws.owner.avatar_key)"
+										:src="ws.owner.avatar_key"
 										alt="owner"
 										class="h-full w-full object-cover"
 									/>
@@ -470,6 +488,7 @@ function clearCreateError(field: keyof WorkspaceFormValues) {
 										<button
 											type="button"
 											class="flex w-full items-center gap-2 border-b border-neutral-200 px-2 py-1.5 text-left text-sm hover:bg-neutral-100 focus:outline-none dark:border-neutral-700 dark:hover:bg-neutral-800"
+											:class="{ 'opacity-60': t.is_hidden }"
 											@click="tasksOpen = false; openTask(group.workspace.id, t)"
 										>
 											<Flame
@@ -480,7 +499,7 @@ function clearCreateError(field: keyof WorkspaceFormValues) {
 												aria-hidden="true"
 											/>
 											<span class="shrink-0 font-medium tabular-nums text-neutral-900 dark:text-neutral-100">{{ t.display_id }}</span>
-											<span class="line-clamp-1 break-words text-neutral-600 dark:text-neutral-300">{{ t.title }}</span>
+											<span class="line-clamp-1 break-words text-neutral-600 dark:text-neutral-300" :class="t.is_hidden ? 'line-through' : ''">{{ t.title }}</span>
 											<span class="ml-auto shrink-0 text-xs text-neutral-500 dark:text-neutral-400">{{ t.column_name }}</span>
 										</button>
 									</li>

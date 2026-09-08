@@ -16,12 +16,11 @@ import {
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { imageUrl } from '@/api/files'
 import { useWS } from '@/api/ws'
 import {
   addBoardFavorite,
-  archiveBoard,
   createBoard,
+  deleteBoard,
   listBoards,
   removeBoardFavorite,
   reorderBoards,
@@ -32,6 +31,7 @@ import BoardKanban from '@/features/boards/components/BoardKanban.vue'
 import { ACCENT_PRESETS, DEFAULT_ACCENT, useTheme } from '@/shared/composables/useTheme'
 import type { Board, WorkspaceDetail, WorkspaceMember } from '@/shared/types'
 import ProfileMenu from '@/shared/ui/ProfileMenu.vue'
+import SignedImage from '@/shared/ui/SignedImage.vue'
 import TagCheck from '@/shared/ui/TagCheck.vue'
 import TagSelect from '@/shared/ui/TagSelect.vue'
 import { extractError } from '@/shared/utils/error'
@@ -83,27 +83,66 @@ const canManage = computed(() => detail.value?.role === 'owner')
 const form = reactive<WorkspaceFormValues>({ name: '', description: '', prefix: '' })
 const formValidation = ref<Partial<Record<keyof WorkspaceFormValues, string>>>({})
 
-const memberForm = reactive<AddMemberValues>({ login: '', role: 'viewer' })
+const memberForm = reactive<AddMemberValues>({ login: '', role: 'member' })
 const memberValidation = ref<Partial<Record<keyof AddMemberValues, string>>>({})
 const transferTarget = ref('')
 
 const roleOptions = [
   { label: 'editor', value: 'editor' },
-  { label: 'viewer', value: 'viewer' },
+  { label: 'member', value: 'member' },
 ]
 const transferOptions = computed(() =>
   transferCandidates.value.map((m) => ({ label: `${m.display_name} (${m.login})`, value: m.id })),
 )
 
+const nowTick = ref(Date.now())
+let inviteTicker: number | null = null
+
+const inviteExpired = computed(() => {
+  if (!inviteExpiresAt.value) return false
+  return new Date(inviteExpiresAt.value).getTime() <= nowTick.value
+})
+
+const inviteExpiryNear = computed(() => {
+  if (!inviteExpiresAt.value || inviteExpired.value) return false
+  return new Date(inviteExpiresAt.value).getTime() - nowTick.value < 24 * 60 * 60 * 1000
+})
+
+function formatInviteExpiry(): string {
+  if (!inviteExpiresAt.value) {
+    return ''
+  }
+  return new Date(inviteExpiresAt.value).toLocaleString()
+}
+
+function formatInviteRemaining(): string {
+  if (!inviteExpiresAt.value) {
+    return ''
+  }
+  const diff = Math.max(0, new Date(inviteExpiresAt.value).getTime() - nowTick.value)
+  const totalSeconds = Math.floor(diff / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) {
+    return `${hours}h ${minutes}m left`
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s left`
+  }
+  return `${seconds}s left`
+}
+
 const boardForm = reactive<{ name: string }>({ name: '' })
 const boardValidation = ref<Partial<Record<string, string>>>({})
 
 const settingsOpen = ref(false)
-const projectModalOpen = ref(false)
+const workspaceModalOpen = ref(false)
 const membersModalOpen = ref(false)
 const boardMenuId = ref<string | null>(null)
 
 const inviteToken = ref<string | null>(null)
+const inviteExpiresAt = ref<string | null>(null)
 const inviteLoading = ref(false)
 const inviteError = ref<string | null>(null)
 const inviteCopied = ref(false)
@@ -120,8 +159,7 @@ const prefixError = ref<string | null>(null)
 const prefixSaving = ref(false)
 
 const boardCreateOpen = ref(false)
-const showArchive = ref(false)
-const pageMenu = ref<'project' | 'board' | 'invite' | null>(null)
+const pageMenu = ref<'workspace' | 'board' | 'invite' | null>(null)
 
 const paletteOpen = ref(false)
 const paletteMode = ref<'personal' | 'workspace'>('personal')
@@ -145,14 +183,13 @@ function onSelectAssignee(id: string) {
 
 const PALETTE_MODE_KEY = 'tandem_ws_palette'
 
-const visibleBoards = computed(() => boards.value.filter((b) => !b.archived))
-const archivedBoards = computed(() => boards.value.filter((b) => b.archived))
+const visibleBoards = computed(() => boards.value.toSorted((a, b) => a.position - b.position))
 const mainBoard = computed(() => boards.value.find((b) => b.is_main) ?? null)
 
 const activeBoard = computed(() => {
   const id = queryBoardId.value
   if (id) {
-    const found = boards.value.find((b) => b.id === id && !b.archived)
+    const found = boards.value.find((b) => b.id === id)
     if (found) {
       return id
     }
@@ -204,13 +241,13 @@ function openBoardSettings(id: string) {
   boardSettingsBoardId.value = id
   boardNameInput.value = b?.name ?? ''
   boardMenuId.value = null
-  projectModalOpen.value = false
+  workspaceModalOpen.value = false
   boardSettingsOpen.value = true
 }
 
-function backToProjectSettings() {
+function backToWorkspaceSettings() {
   boardSettingsOpen.value = false
-  projectModalOpen.value = true
+  workspaceModalOpen.value = true
 }
 
 async function onSaveBoardName() {
@@ -289,7 +326,10 @@ async function load() {
     form.description = d.description
     form.prefix = d.prefix
     boards.value = b
-    if (transferTarget.value !== d.id) {
+    if (transferTarget.value && !d.members.some((m) => m.id === transferTarget.value)) {
+      transferTarget.value = ''
+    }
+    if (!transferTarget.value) {
       const firstTarget = d.members.find((m) => m.id !== actorId)
       transferTarget.value = firstTarget?.id ?? ''
     }
@@ -365,7 +405,7 @@ async function autosaveWorkspace() {
     await updateWorkspace(workspaceId.value, {
       name: form.name.trim(),
       description: form.description.trim(),
-      prefix: form.prefix.trim(),
+      prefix: (form.prefix ?? '').trim(),
     })
     await load()
   } catch (e) {
@@ -374,7 +414,7 @@ async function autosaveWorkspace() {
 }
 
 function openPrefixModal() {
-  prefixDraft.value = form.prefix
+  prefixDraft.value = form.prefix ?? ''
   prefixError.value = null
   prefixModalOpen.value = true
 }
@@ -419,7 +459,7 @@ async function onCreateBoard() {
     const created = await createBoard(workspaceId.value, { name: result.data.name })
     boardForm.name = ''
     boardCreateOpen.value = false
-    projectModalOpen.value = false
+    workspaceModalOpen.value = false
     await load()
     router.replace({ query: { board: created.id } })
   } catch (e) {
@@ -440,14 +480,18 @@ async function onRenameBoard(id: string, name: string) {
   }
 }
 
-async function onArchiveBoard(id: string, archived: boolean) {
+async function onDeleteBoard(id: string) {
+  const meta = boards.value.find((b) => b.id === id)
+  if (!window.confirm(`Delete board ${meta?.name ?? ''}? This cannot be undone.`)) {
+    return
+  }
   actionError.value = null
   try {
-    await archiveBoard(workspaceId.value, id, { archived })
+    await deleteBoard(workspaceId.value, id)
     const wasActive = activeBoard.value === id
     await load()
     if (wasActive) {
-      router.replace({ query: { ...(detail.value ? { board: mainBoard.value?.id } : {}) } })
+      router.replace({ query: { board: mainBoard.value?.id } })
     }
   } catch (e) {
     actionError.value = extractError(e)
@@ -465,8 +509,8 @@ async function onSetMain(id: string) {
   }
 }
 
-async function onReorder(e: { oldIndex: number; newIndex: number }) {
-  if (e.oldIndex === e.newIndex) {
+async function onReorder(e: { oldIndex?: number; newIndex?: number }) {
+  if (e.oldIndex === undefined || e.newIndex === undefined || e.oldIndex === e.newIndex) {
     return
   }
   actionError.value = null
@@ -514,7 +558,7 @@ async function onRemoveMember(member: WorkspaceMember) {
 async function onChangeRole(member: WorkspaceMember, role: string) {
   actionError.value = null
   try {
-    await updateMemberRole(workspaceId.value, member.id, { role: role as 'editor' | 'viewer' })
+    await updateMemberRole(workspaceId.value, member.id, { role: role as 'editor' | 'member' })
     await load()
   } catch (e) {
     actionError.value = extractError(e)
@@ -547,6 +591,7 @@ async function onLoadInvite() {
   try {
     const res = await getInvite(workspaceId.value)
     inviteToken.value = res.invite_token
+    inviteExpiresAt.value = res.expires_at ?? null
     inviteCopied.value = false
   } catch (e) {
     inviteError.value = extractError(e)
@@ -585,6 +630,7 @@ async function onDisableInvite() {
   try {
     await disableInvite(workspaceId.value)
     inviteToken.value = null
+    inviteExpiresAt.value = null
     inviteCopied.value = false
   } catch (e) {
     inviteError.value = extractError(e)
@@ -708,7 +754,31 @@ onUnmounted(() => {
     unsubscribe()
   }
   wsUnsubscribes.length = 0
+  if (inviteTicker !== null) {
+    window.clearInterval(inviteTicker)
+    inviteTicker = null
+  }
   setAccent(themeAccent.value)
+})
+
+watch(inviteExpiresAt, (value) => {
+  if (inviteTicker !== null) {
+    window.clearInterval(inviteTicker)
+    inviteTicker = null
+  }
+  if (value) {
+    nowTick.value = Date.now()
+    inviteTicker = window.setInterval(() => {
+      nowTick.value = Date.now()
+    }, 1000)
+  }
+})
+
+watch(inviteExpired, (expired) => {
+  if (expired && inviteTicker !== null) {
+    window.clearInterval(inviteTicker)
+    inviteTicker = null
+  }
 })
 
 watch(workspaceId, (newId, oldId) => {
@@ -854,9 +924,9 @@ watch(
 								<button
 									type="button"
 									class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 focus:outline-none dark:text-neutral-300 dark:hover:bg-neutral-800"
-									@click="settingsOpen = false; projectModalOpen = true"
+									@click="settingsOpen = false; workspaceModalOpen = true"
 								>
-									<span>Project settings</span>
+									<span>Workspace settings</span>
 								</button>
 								<button
 									v-if="activeBoard"
@@ -1076,10 +1146,10 @@ watch(
 			</template>
 		</main>
 
-		<div v-if="projectModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4" @click.self="projectModalOpen = false">
+		<div v-if="workspaceModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4" @click.self="workspaceModalOpen = false" @keydown.esc="workspaceModalOpen = false">
 			<div v-if="detail" class="flex max-h-[85vh] w-[48rem] max-w-full flex-col border border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-900">
 				<div class="flex items-center justify-between border-b border-neutral-300 px-5 py-3 dark:border-neutral-700">
-					<h2 class="text-lg text-neutral-900 dark:text-neutral-100">Project settings</h2>
+					<h2 class="text-lg text-neutral-900 dark:text-neutral-100">Workspace settings</h2>
 					<div class="flex items-center">
 						<button
 							type="button"
@@ -1102,14 +1172,14 @@ watch(
 							<button
 								v-if="canManage"
 								type="button"
-								:aria-label="'Project actions'"
+								:aria-label="'Workspace actions'"
 								class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
-								@click="pageMenu = pageMenu === 'project' ? null : 'project'"
+								@click="pageMenu = pageMenu === 'workspace' ? null : 'workspace'"
 							>
 								<MoreHorizontal :size="16" />
 							</button>
 							<div
-								v-if="pageMenu === 'project'"
+								v-if="pageMenu === 'workspace'"
 								class="absolute right-0 top-full z-30 mt-1 w-52 border border-neutral-300 bg-white py-1 shadow-lg dark:border-neutral-600 dark:bg-neutral-900"
 							>
 								<button
@@ -1125,7 +1195,7 @@ watch(
 							type="button"
 							class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
 							aria-label="Close"
-							@click="projectModalOpen = false"
+							@click="workspaceModalOpen = false"
 						>
 							✕
 						</button>
@@ -1180,7 +1250,7 @@ watch(
 									<button
 										v-if="canEdit"
 										type="button"
-										:aria-label="'Change project prefix'"
+										:aria-label="'Change workspace prefix'"
 										class="flex h-9 w-9 shrink-0 items-center justify-center border border-blue-700 text-blue-700 hover:bg-blue-50 focus:outline-none dark:border-blue-400 dark:text-blue-400 dark:hover:bg-neutral-800"
 										@click="openPrefixModal"
 									>
@@ -1239,7 +1309,7 @@ watch(
 									type="button"
 									class="flex h-7 w-7 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
 									:aria-label="`Open board ${board.name}`"
-									@click="projectModalOpen = false; selectBoard(board.id)"
+									@click="workspaceModalOpen = false; selectBoard(board.id)"
 								>
 									<ChevronRight :size="16" />
 								</button>
@@ -1256,21 +1326,6 @@ watch(
 							>
 								Add new board
 							</button>
-							<div v-if="archivedBoards.length" class="flex items-center gap-2">
-								<button
-									type="button"
-									role="switch"
-									:aria-checked="showArchive"
-									class="flex h-5 w-9 items-center focus:outline-none"
-									:class="showArchive ? 'bg-blue-700 dark:bg-blue-400' : 'bg-neutral-300 dark:bg-neutral-700'"
-									@click="showArchive = !showArchive"
-								>
-									<span class="h-4 w-4 bg-white transition-transform"
-										:class="showArchive ? 'translate-x-5' : 'translate-x-0'"
-									/>
-								</button>
-								<span class="text-sm text-neutral-500 dark:text-neutral-400">Show archive</span>
-							</div>
 							<p v-if="actionError" class="text-sm text-blue-700 dark:text-blue-400">{{ actionError }}</p>
 						</div>
 
@@ -1301,36 +1356,6 @@ watch(
 							</button>
 						</div>
 						<p v-if="boardValidation.name" class="mt-2 text-sm text-blue-700 dark:text-blue-400">{{ boardValidation.name }}</p>
-
-						<div v-if="showArchive && archivedBoards.length" class="mt-5">
-							<h3 class="mb-2 text-sm font-semibold uppercase text-neutral-500 dark:text-neutral-400">Archived</h3>
-							<div class="flex flex-col gap-1">
-								<div
-									v-for="board in archivedBoards"
-									:key="board.id"
-									class="flex items-center border border-neutral-300 bg-white py-1 dark:border-neutral-600 dark:bg-neutral-900"
-								>
-									<span class="w-8 shrink-0" />
-									<span class="min-w-0 flex-1 truncate px-2 text-sm text-neutral-500 dark:text-neutral-400" :title="board.name">{{ board.name }}</span>
-									<button
-										v-if="canEdit"
-										type="button"
-										class="mr-1 border border-blue-700 px-2 py-1 text-sm text-blue-700 hover:bg-blue-50 focus:outline-none dark:border-blue-400 dark:text-blue-400 dark:hover:bg-neutral-800"
-										@click="onArchiveBoard(board.id, false)"
-									>
-										Restore
-									</button>
-									<button
-										type="button"
-										:aria-label="'Board actions'"
-										class="flex h-7 w-7 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
-										@click="boardMenuId = board.id"
-									>
-										<MoreHorizontal :size="16" />
-									</button>
-								</div>
-							</div>
-						</div>
 					</div>
 				</div>
 			</div>
@@ -1346,7 +1371,7 @@ watch(
 					<button
 						type="button"
 						class="px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 focus:outline-none dark:text-neutral-300 dark:hover:bg-neutral-800"
-						@click="boardMenuId = null; selectBoard(boardMenuId)"
+						@click="selectBoard(boardMenuId); boardMenuId = null"
 					>
 						Open
 					</button>
@@ -1361,10 +1386,10 @@ watch(
 					<button
 						v-if="canEdit && !(boards.find(b => b.id === boardMenuId)?.is_main)"
 						type="button"
-						class="px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 focus:outline-none dark:text-neutral-300 dark:hover:bg-neutral-800"
-						@click="onArchiveBoard(boardMenuId, !(boards.find(b => b.id === boardMenuId)?.archived)); boardMenuId = null"
+						class="px-4 py-2 text-left text-sm text-blue-700 hover:bg-neutral-100 focus:outline-none dark:text-blue-400 dark:hover:bg-neutral-800"
+						@click="onDeleteBoard(boardMenuId); boardMenuId = null"
 					>
-						Archive board
+						Delete board
 					</button>
 					<button
 						v-if="canEdit && !(boards.find(b => b.id === boardMenuId)?.is_main)"
@@ -1380,7 +1405,7 @@ watch(
 			<div v-if="prefixModalOpen" class="fixed inset-0 z-[60] flex items-center justify-center bg-neutral-950/60 p-4" @click.self="prefixModalOpen = false">
 				<div class="w-full max-w-lg border border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-900">
 					<div class="flex items-center justify-between border-b border-neutral-300 px-5 py-3 dark:border-neutral-700">
-						<h2 class="text-lg text-neutral-900 dark:text-neutral-100">Change project prefix</h2>
+						<h2 class="text-lg text-neutral-900 dark:text-neutral-100">Change workspace prefix</h2>
 						<button
 							type="button"
 							class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
@@ -1392,7 +1417,7 @@ watch(
 					</div>
 					<div class="flex flex-col gap-3 p-5">
 						<div class="flex flex-col gap-1">
-							<label for="edit_prefix2" class="text-sm">Project prefix</label>
+							<label for="edit_prefix2" class="text-sm">Workspace prefix</label>
 							<input
 								id="edit_prefix2"
 								v-model="prefixDraft"
@@ -1422,7 +1447,7 @@ watch(
 			</div>
 		</div>
 
-		<div v-if="membersModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4" @click.self="membersModalOpen = false">
+		<div v-if="membersModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4" @click.self="membersModalOpen = false" @keydown.esc="membersModalOpen = false">
 			<div v-if="detail" class="flex max-h-[85vh] w-[48rem] max-w-full flex-col border border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-900">
 				<div class="flex items-center justify-between border-b border-neutral-300 px-5 py-3 dark:border-neutral-700">
 					<h2 class="text-lg text-neutral-900 dark:text-neutral-100">Members</h2>
@@ -1505,6 +1530,14 @@ watch(
 								{{ inviteCopied ? 'Copied' : 'Copy' }}
 							</button>
 						</div>
+						<p
+							v-if="inviteToken && inviteExpiresAt"
+							class="text-xs text-neutral-500 dark:text-neutral-400"
+						>
+							<template v-if="inviteExpired">Invite expired — generate a new link</template>
+							<template v-else-if="inviteExpiryNear">Expires soon — {{ formatInviteRemaining() }}</template>
+							<template v-else>Expires {{ formatInviteExpiry() }}</template>
+						</p>
 						<button
 							v-else
 							type="button"
@@ -1526,9 +1559,9 @@ watch(
 							class="flex items-center gap-3 border border-neutral-300 bg-white p-3 dark:border-neutral-600 dark:bg-neutral-900"
 						>
 							<span class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden border border-neutral-300 bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800">
-								<img
+								<SignedImage
 									v-if="member.avatar_key"
-									:src="imageUrl(member.avatar_key)"
+									:src="member.avatar_key"
 									alt="avatar"
 									class="h-full w-full object-cover"
 								/>
@@ -1584,13 +1617,13 @@ watch(
 			</div>
 		</div>
 
-		<div v-if="boardSettingsOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4" @click.self="boardSettingsOpen = false">
+		<div v-if="boardSettingsOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/60 p-4" @click.self="boardSettingsOpen = false" @keydown.esc="boardSettingsOpen = false">
 			<div class="flex max-h-[85vh] w-[48rem] max-w-full flex-col border border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-900">
 				<div class="flex items-center justify-between border-b border-neutral-300 px-5 py-3 dark:border-neutral-700">
 					<button
 						type="button"
 						class="flex items-center gap-1 text-sm text-blue-700 hover:bg-neutral-100 focus:outline-none dark:text-blue-400 dark:hover:bg-neutral-800"
-						@click="backToProjectSettings"
+						@click="backToWorkspaceSettings"
 					>
 						<ChevronLeft :size="16" />
 						Back
@@ -1625,15 +1658,15 @@ watch(
 								<MoreHorizontal :size="16" />
 							</button>
 							<div
-								v-if="pageMenu === 'board'"
+								v-if="board && pageMenu === 'board'"
 								class="absolute right-0 top-full z-30 mt-1 w-48 border border-neutral-300 bg-white py-1 shadow-lg dark:border-neutral-600 dark:bg-neutral-900"
 							>
 								<button
 									type="button"
 									class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 focus:outline-none dark:text-neutral-300 dark:hover:bg-neutral-800"
-									@click="pageMenu = null; onArchiveBoard(board.id, !board.archived)"
+									@click="pageMenu = null; onDeleteBoard(board.id)"
 								>
-									{{ board.archived ? 'Restore' : 'Archive board' }}
+									Delete board
 								</button>
 							</div>
 						</div>
@@ -1650,7 +1683,6 @@ watch(
 				<div class="flex-1 overflow-y-auto p-5">
 					<h2 class="text-lg text-neutral-900 dark:text-neutral-100">
 						Board settings
-						<span v-if="board?.archived" class="text-neutral-500 dark:text-neutral-400">(archived)</span>
 					</h2>
 					<p v-if="actionError" class="mt-3 text-sm text-blue-700 dark:text-blue-400">{{ actionError }}</p>
 

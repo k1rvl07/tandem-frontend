@@ -1,6 +1,5 @@
 import { http } from '@/api/http'
 import type {
-  ArchiveBoardRequest,
   Board,
   BoardDetail,
   CreateBoardRequest,
@@ -13,9 +12,8 @@ import type {
   UpdateTaskRequest,
 } from '@/shared/types'
 
-export async function listBoards(workspaceId: string, includeArchived?: boolean): Promise<Board[]> {
-  const params = includeArchived ? { include_archived: '1' } : {}
-  const res = await http.get<Board[]>(`/workspaces/${workspaceId}/boards`, { params })
+export async function listBoards(workspaceId: string): Promise<Board[]> {
+  const res = await http.get<Board[]>(`/workspaces/${workspaceId}/boards`)
   return res.data
 }
 
@@ -52,15 +50,6 @@ export async function addBoardFavorite(boardId: string): Promise<void> {
 
 export async function removeBoardFavorite(boardId: string): Promise<void> {
   await http.delete(`/favorites/boards/${boardId}`)
-}
-
-export async function archiveBoard(
-  workspaceId: string,
-  boardId: string,
-  payload: ArchiveBoardRequest,
-): Promise<Board> {
-  const res = await http.put<Board>(`/workspaces/${workspaceId}/boards/${boardId}/archive`, payload)
-  return res.data
 }
 
 export async function reorderBoards(

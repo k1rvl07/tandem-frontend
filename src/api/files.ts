@@ -35,6 +35,3 @@ export async function getSignedUrl(key: string): Promise<string> {
   return promise
 }
 
-export function imageUrl(key: string): string {
-  return `/api/v1/files/${key}`
-}
