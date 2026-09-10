@@ -10,6 +10,7 @@ import {
   Pencil,
   Settings,
   Star,
+  Trash2,
   UserRound,
   X,
 } from 'lucide-vue-next'
@@ -140,6 +141,16 @@ const settingsOpen = ref(false)
 const workspaceModalOpen = ref(false)
 const membersModalOpen = ref(false)
 const boardMenuId = ref<string | null>(null)
+const boardMenuTop = ref(0)
+const boardMenuRight = ref(0)
+
+function openBoardMenu(id: string, event: MouseEvent) {
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  boardMenuTop.value = Math.min(rect.bottom + 4, window.innerHeight - 160)
+  boardMenuRight.value = window.innerWidth - rect.right
+  boardMenuId.value = id
+}
 
 const inviteToken = ref<string | null>(null)
 const inviteExpiresAt = ref<string | null>(null)
@@ -1168,29 +1179,15 @@ watch(
 								:fill="detail.is_favorite ? 'currentColor' : 'none'"
 							/>
 						</button>
-						<div data-menu="pageMenu" class="relative">
-							<button
-								v-if="canManage"
-								type="button"
-								:aria-label="'Workspace actions'"
-								class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
-								@click="pageMenu = pageMenu === 'workspace' ? null : 'workspace'"
-							>
-								<MoreHorizontal :size="16" />
-							</button>
-							<div
-								v-if="pageMenu === 'workspace'"
-								class="absolute right-0 top-full z-30 mt-1 w-52 border border-neutral-300 bg-white py-1 shadow-lg dark:border-neutral-600 dark:bg-neutral-900"
-							>
-								<button
-									type="button"
-									class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-blue-700 hover:bg-neutral-100 focus:outline-none dark:text-blue-400 dark:hover:bg-neutral-800"
-									@click="pageMenu = null; onDelete()"
-								>
-									Delete workspace
-								</button>
-							</div>
-						</div>
+						<button
+							v-if="canManage"
+							type="button"
+							:aria-label="'Delete workspace'"
+							class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
+							@click="onDelete()"
+						>
+							<Trash2 :size="16" />
+						</button>
 						<button
 							type="button"
 							class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
@@ -1267,6 +1264,7 @@ watch(
 								:model-value="visibleBoards"
 								:animation="150"
 								:disabled="!canEdit"
+								:handle="'.drag-handle'"
 								class="flex flex-col gap-1"
 								@update:model-value="$event => void 0"
 								@end="onReorder"
@@ -1276,7 +1274,7 @@ watch(
 									:key="board.id"
 									class="flex items-center border border-neutral-300 bg-white py-1 dark:border-neutral-600 dark:bg-neutral-900"
 								>
-									<span class="flex w-8 shrink-0 cursor-grab items-center justify-center gap-[3px]">
+									<span class="drag-handle flex w-8 shrink-0 cursor-grab items-center justify-center gap-[3px]">
 										<span class="flex flex-col gap-[2px]">
 											<span class="h-[3px] w-[3px] bg-neutral-400" />
 											<span class="h-[3px] w-[3px] bg-neutral-400" />
@@ -1301,7 +1299,7 @@ watch(
 									type="button"
 									:aria-label="'Board actions'"
 									class="flex h-7 w-7 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
-									@click="boardMenuId = board.id"
+									@click="openBoardMenu(board.id, $event)"
 								>
 									<MoreHorizontal :size="16" />
 								</button>
@@ -1362,11 +1360,12 @@ watch(
 
 			<div
 				v-if="boardMenuId"
-				class="fixed inset-0 z-[60] bg-neutral-950/40"
+				class="fixed inset-0 z-[60]"
 				@click="boardMenuId = null"
 			>
 				<div
-					class="absolute right-1/2 top-1/2 flex w-52 translate-x-1/2 translate-y-1/2 flex-col border border-neutral-300 bg-white py-1 shadow-lg dark:border-neutral-600 dark:bg-neutral-900"
+					class="absolute flex w-52 flex-col border border-neutral-300 bg-white py-1 shadow-lg dark:border-neutral-600 dark:bg-neutral-900"
+					:style="{ top: `${boardMenuTop}px`, right: `${boardMenuRight}px` }"
 				>
 					<button
 						type="button"
@@ -1647,29 +1646,15 @@ watch(
 								:fill="board.is_favorite ? 'currentColor' : 'none'"
 							/>
 						</button>
-						<div data-menu="pageMenu" class="relative">
-							<button
-								v-if="board && canEdit && !board.is_main"
-								type="button"
-								:aria-label="'Board actions'"
-								class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
-								@click="pageMenu = pageMenu === 'board' ? null : 'board'"
-							>
-								<MoreHorizontal :size="16" />
-							</button>
-							<div
-								v-if="board && pageMenu === 'board'"
-								class="absolute right-0 top-full z-30 mt-1 w-48 border border-neutral-300 bg-white py-1 shadow-lg dark:border-neutral-600 dark:bg-neutral-900"
-							>
-								<button
-									type="button"
-									class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 focus:outline-none dark:text-neutral-300 dark:hover:bg-neutral-800"
-									@click="pageMenu = null; onDeleteBoard(board.id)"
-								>
-									Delete board
-								</button>
-							</div>
-						</div>
+						<button
+							v-if="board && canEdit && !board.is_main"
+							type="button"
+							:aria-label="'Delete board'"
+							class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"
+							@click="onDeleteBoard(board.id)"
+						>
+							<Trash2 :size="16" />
+						</button>
 						<button
 							type="button"
 							class="flex h-8 w-8 items-center justify-center text-neutral-600 hover:bg-neutral-100 focus:outline-none dark:text-neutral-400 dark:hover:bg-neutral-800"

@@ -51,7 +51,7 @@ function positionMenu() {
   const r = el.getBoundingClientRect()
   const menuW = Math.min(Math.max(menu.value?.offsetWidth ?? 176, 176), menuMaxWidth)
   const menuH = menu.value?.offsetHeight ?? 240
-  let left = r.right - menuW
+  let left = r.left
   if (left < 8) {
     left = 8
   }
