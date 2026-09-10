@@ -62,6 +62,12 @@ export const useAuthStore = defineStore('auth', () => {
     return profile
   }
 
+  async function removeAvatar(): Promise<User> {
+    const profile = await profileApi.removeAvatar()
+    setUser(profile)
+    return profile
+  }
+
   async function changePassword(payload: ChangePasswordRequest): Promise<void> {
     const next = await profileApi.changePassword(payload)
     token.value = next
@@ -78,6 +84,7 @@ export const useAuthStore = defineStore('auth', () => {
     fetchProfile,
     updateProfile,
     uploadAvatar,
+    removeAvatar,
     changePassword,
   }
 })

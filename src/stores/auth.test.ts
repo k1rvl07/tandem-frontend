@@ -12,6 +12,7 @@ const apiMocks = vi.hoisted(() => ({
     getProfile: vi.fn(),
     updateProfile: vi.fn(),
     uploadAvatar: vi.fn(),
+    removeAvatar: vi.fn(),
     changePassword: vi.fn(),
   },
 }))
@@ -133,5 +134,17 @@ describe('useAuthStore', () => {
 
     expect(store.token).toBe(next)
     expect(localStorage.getItem(TOKEN_KEY)).toBe(next)
+  })
+
+  it('removeAvatar clears avatar_key in the stored user', async () => {
+    const cleared = { ...user, avatar_key: '' }
+    apiMocks.profile.removeAvatar.mockResolvedValueOnce(cleared)
+    const store = useAuthStore()
+
+    await store.removeAvatar()
+
+    expect(apiMocks.profile.removeAvatar).toHaveBeenCalledTimes(1)
+    expect(store.user).toEqual(cleared)
+    expect(localStorage.getItem(USER_KEY)).toBe(JSON.stringify(cleared))
   })
 })

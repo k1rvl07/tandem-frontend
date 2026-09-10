@@ -10,6 +10,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   upload: [file: File]
+  remove: []
 }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -47,6 +48,15 @@ function onClick() {
 			class="hidden"
 			@change="onSelect"
 		/>
+		<button
+			type="button"
+			v-if="props.avatarKey"
+			:disabled="props.submitting"
+			class="border border-neutral-300 px-4 py-2 text-neutral-600 hover:bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
+			@click="emit('remove')"
+		>
+			Remove
+		</button>
 		<button
 			type="button"
 			:disabled="props.submitting"

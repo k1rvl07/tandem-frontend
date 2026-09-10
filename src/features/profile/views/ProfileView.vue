@@ -47,6 +47,18 @@ async function onUploadAvatar(file: File) {
   }
 }
 
+async function onRemoveAvatar() {
+  avatarError.value = null
+  avatarSubmitting.value = true
+  try {
+    await auth.removeAvatar()
+  } catch (e) {
+    avatarError.value = extractError(e)
+  } finally {
+    avatarSubmitting.value = false
+  }
+}
+
 async function onChangePassword(values: ChangePasswordFormValues) {
   passwordError.value = null
   passwordSaved.value = false
@@ -86,7 +98,7 @@ async function onChangePassword(values: ChangePasswordFormValues) {
 
 		<div class="flex flex-col gap-6">
 			<section class="flex items-center gap-4 border border-neutral-300 bg-white p-6 dark:border-neutral-700 dark:bg-neutral-900">
-				<AvatarUpload :avatar-key="auth.user?.avatar_key ?? ''" :submitting="avatarSubmitting" @upload="onUploadAvatar" />
+				<AvatarUpload :avatar-key="auth.user?.avatar_key ?? ''" :submitting="avatarSubmitting" @upload="onUploadAvatar" @remove="onRemoveAvatar" />
 			</section>
 			<p v-if="avatarError" class="text-sm text-blue-700 dark:text-blue-400">{{ avatarError }}</p>
 
