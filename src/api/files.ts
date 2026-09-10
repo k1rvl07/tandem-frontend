@@ -16,6 +16,10 @@ export async function uploadImage(file: File, namespace = 'avatars'): Promise<Up
   return res.data
 }
 
+export async function deleteImage(key: string): Promise<void> {
+  await http.delete('/files/images', { params: { key } })
+}
+
 export async function getSignedUrl(key: string): Promise<string> {
   const now = Date.now()
   const hit = signedCache.get(key)

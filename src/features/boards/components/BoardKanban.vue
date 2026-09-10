@@ -13,7 +13,7 @@ import {
 } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
-import { uploadImage } from '@/api/files'
+import { deleteImage, uploadImage } from '@/api/files'
 import { http } from '@/api/http'
 import { useWS } from '@/api/ws'
 import { getWorkspace } from '@/features/workspaces/api'
@@ -205,6 +205,7 @@ const parentOptions = ref<Task[]>([])
 const attachments = ref<TaskAttachment[]>([])
 const attachmentBlobs = reactive<Record<string, string>>({})
 const pendingAttachments = ref<{ file: File; url: string }[]>([])
+const removedAttachmentIds = ref<string[]>([])
 const workspaceTasks = ref<Task[]>([])
 
 function clearPendingAttachments() {
@@ -214,6 +215,17 @@ function clearPendingAttachments() {
     }
   }
   pendingAttachments.value = []
+}
+
+function clearRemovedAttachmentIds() {
+  removedAttachmentIds.value = []
+}
+
+function clearPendingCover() {
+  if (pendingCover.value?.url) {
+    URL.revokeObjectURL(pendingCover.value.url)
+  }
+  pendingCover.value = null
 }
 
 function revokeAttachmentBlobs() {
@@ -244,10 +256,9 @@ async function hydrateAttachmentBlobs(list: TaskAttachment[]) {
 const menuOpen = ref(false)
 const taskMenu = ref<HTMLDivElement | null>(null)
 const taskMenuAnchor = ref<HTMLButtonElement | null>(null)
-const attachmentUploading = ref(false)
 const attachmentInput = ref<HTMLInputElement | null>(null)
-const coverUploading = ref(false)
 const coverInput = ref<HTMLInputElement | null>(null)
+const pendingCover = ref<{ file: File; url: string } | null>(null)
 
 const boardOptions = computed(() => boards.value.map((b) => ({ label: b.name, value: b.id })))
 const columnOptionList = computed(() =>
@@ -705,6 +716,8 @@ async function openCreate(columnId?: string) {
   currentBoardId.value = props.boardId ?? ''
   attachments.value = []
   clearPendingAttachments()
+  clearRemovedAttachmentIds()
+  clearPendingCover()
   menuOpen.value = false
   resetForm()
   await Promise.all([loadBoards(), loadBoardColumns(taskForm.board_id), loadParentOptions(null)])
@@ -717,6 +730,8 @@ defineExpose({ openCreate })
 async function openEdit(task: { id: string }) {
   attachments.value = []
   clearPendingAttachments()
+  clearRemovedAttachmentIds()
+  clearPendingCover()
   menuOpen.value = false
   taskValidation.value = {}
   try {
@@ -779,6 +794,8 @@ async function duplicateTask() {
   editingTaskId.value = null
   attachments.value = []
   clearPendingAttachments()
+  clearRemovedAttachmentIds()
+  clearPendingCover()
   taskForm.title = src.title
   taskForm.description = src.description
   taskForm.assignee_id = src.assignee?.id ?? ''
@@ -803,6 +820,8 @@ async function createSubtask() {
   editingTaskId.value = null
   attachments.value = []
   clearPendingAttachments()
+  clearRemovedAttachmentIds()
+  clearPendingCover()
   resetForm()
   taskForm.parent_id = parentId
   await Promise.all([loadBoards(), loadBoardColumns(taskForm.board_id), loadParentOptions(null)])
@@ -840,8 +859,18 @@ async function onSaveTask() {
   taskValidation.value = {}
   actionError.value = null
   const data = result.data
+  let uploadedCoverKey = ''
+  let saved = false
   try {
+    if (pendingCover.value) {
+      const coverRes = await uploadImage(pendingCover.value.file, 'covers')
+      uploadedCoverKey = coverRes.key
+      taskForm.image_key = coverRes.key
+      data.image_key = coverRes.key
+    }
+    let savedTaskId = ''
     if (editingTaskId.value) {
+      savedTaskId = editingTaskId.value
       const targetBoardId = data.board_id ?? currentBoardId.value
       const boardChanged = targetBoardId !== currentBoardId.value
       if (boardChanged) {
@@ -872,7 +901,7 @@ async function onSaveTask() {
     } else {
       const targetBoardId = data.board_id ?? props.boardId
       if (!targetBoardId) {
-        return
+        throw new Error('board is required')
       }
       const created = await createTask(props.workspaceId, targetBoardId, {
         title: data.title,
@@ -886,28 +915,36 @@ async function onSaveTask() {
         is_hidden: data.is_hidden,
         image_key: data.image_key,
       })
-      const pending = pendingAttachments.value
-      clearPendingAttachments()
-      if (pending.length) {
-        const failed: string[] = []
-        for (const item of pending) {
-          try {
-            await createAttachment(props.workspaceId, created.id, item.file)
-          } catch {
-            failed.push(item.file.name)
-          }
-          if (item.url) {
-            URL.revokeObjectURL(item.url)
-          }
-        }
-        if (failed.length) {
-          actionError.value = `Task created, but attachment upload failed: ${failed.join(', ')}`
+      savedTaskId = created.id
+      applyCreated(created)
+    }
+    saved = true
+    clearPendingCover()
+    if (editingTaskId.value && removedAttachmentIds.value.length) {
+      const toRemove = [...removedAttachmentIds.value]
+      removedAttachmentIds.value = []
+      for (const id of toRemove) {
+        try {
+          await deleteAttachment(props.workspaceId, editingTaskId.value, id)
+        } catch {}
+        if (attachmentBlobs[id]) {
+          URL.revokeObjectURL(attachmentBlobs[id])
+          delete attachmentBlobs[id]
         }
       }
-      applyCreated(created)
+    }
+    if (pendingAttachments.value.length) {
+      const failed = await attachPendingAttachments(savedTaskId)
+      if (failed.length) {
+        actionError.value = `Task saved, but attachment upload failed: ${failed.join(', ')}`
+      }
     }
     editorOpen.value = false
   } catch (e) {
+    if (uploadedCoverKey && !saved) {
+      taskForm.image_key = ''
+      void deleteImage(uploadedCoverKey).catch(() => {})
+    }
     actionError.value = extractError(e)
   }
 }
@@ -916,32 +953,17 @@ function onPickAttachment() {
   attachmentInput.value?.click()
 }
 
-async function onAttachmentFile(event: Event) {
+function onAttachmentFile(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (!file || attachmentUploading.value) {
+  if (!file) {
     return
   }
-  if (!editingTaskId.value) {
-    pendingAttachments.value.push({
-      file,
-      url: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
-    })
-    return
-  }
-  attachmentUploading.value = true
-  try {
-    const created = await createAttachment(props.workspaceId, editingTaskId.value, file)
-    if (!attachments.value.some((a) => a.id === created.id)) {
-      attachments.value.push(created)
-      await hydrateAttachmentBlobs([created])
-    }
-  } catch (e) {
-    actionError.value = extractError(e)
-  } finally {
-    attachmentUploading.value = false
-  }
+  pendingAttachments.value.push({
+    file,
+    url: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+  })
 }
 
 function removePendingAttachment(index: number) {
@@ -952,46 +974,52 @@ function removePendingAttachment(index: number) {
   pendingAttachments.value.splice(index, 1)
 }
 
+async function attachPendingAttachments(taskId: string): Promise<string[]> {
+  const pending = pendingAttachments.value
+  clearPendingAttachments()
+  const failed: string[] = []
+  for (const item of pending) {
+    try {
+      await createAttachment(props.workspaceId, taskId, item.file)
+    } catch {
+      failed.push(item.file.name)
+    }
+    if (item.url) {
+      URL.revokeObjectURL(item.url)
+    }
+  }
+  return failed
+}
+
 async function removeAttachment(attachment: TaskAttachment) {
   if (!editingTaskId.value) {
     return
   }
-  try {
-    await deleteAttachment(props.workspaceId, editingTaskId.value, attachment.id)
-    attachments.value = attachments.value.filter((a) => a.id !== attachment.id)
-    if (attachmentBlobs[attachment.id]) {
-      URL.revokeObjectURL(attachmentBlobs[attachment.id])
-      delete attachmentBlobs[attachment.id]
-    }
-  } catch (e) {
-    actionError.value = extractError(e)
-  }
+  removedAttachmentIds.value.push(attachment.id)
+  attachments.value = attachments.value.filter((a) => a.id !== attachment.id)
 }
 
 function onPickCover() {
   coverInput.value?.click()
 }
 
-async function onCoverFile(event: Event) {
+function onCoverFile(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (!file || coverUploading.value) {
+  if (!file) {
     return
   }
-  coverUploading.value = true
-  try {
-    const res = await uploadImage(file, 'covers')
-    taskForm.image_key = res.key
-  } catch (e) {
-    actionError.value = extractError(e)
-  } finally {
-    coverUploading.value = false
+  clearPendingCover()
+  pendingCover.value = {
+    file,
+    url: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
   }
 }
 
 function clearCover() {
   taskForm.image_key = ''
+  clearPendingCover()
 }
 
 async function deleteTaskAction() {
@@ -1111,6 +1139,8 @@ function closeEditor() {
   editorOpen.value = false
   menuOpen.value = false
   clearPendingAttachments()
+  clearRemovedAttachmentIds()
+  clearPendingCover()
   revokeAttachmentBlobs()
 }
 
@@ -1346,14 +1376,13 @@ watch(editorOpen, (open) => {
 								<button
 									type="button"
 									class="flex items-center gap-1 text-sm text-blue-700 hover:text-blue-800 disabled:opacity-50 dark:text-blue-400 dark:hover:text-blue-400"
-									:disabled="coverUploading"
 									@click="onPickCover"
 								>
 									<ImagePlus class="h-4 w-4" />
-									{{ coverUploading ? 'Uploading...' : taskForm.image_key ? 'Replace' : 'Add' }}
+									{{ taskForm.image_key || pendingCover ? 'Replace' : 'Add' }}
 								</button>
 								<button
-									v-if="taskForm.image_key"
+									v-if="taskForm.image_key || pendingCover"
 									type="button"
 									class="text-sm text-neutral-500 hover:text-blue-700 dark:text-neutral-400 dark:hover:text-blue-400"
 									@click="clearCover"
@@ -1362,7 +1391,15 @@ watch(editorOpen, (open) => {
 								</button>
 							</div>
 						</div>
-						<div v-if="taskForm.image_key" class="border border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/40">
+						<div v-if="pendingCover" class="border border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/40">
+							<img
+								v-if="pendingCover.url"
+								:src="pendingCover.url"
+								alt="cover"
+								class="aspect-video w-full object-cover"
+							/>
+						</div>
+						<div v-else-if="taskForm.image_key" class="border border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/40">
 							<SignedImage
 								:src="taskForm.image_key"
 								alt="cover"
@@ -1577,14 +1614,12 @@ watch(editorOpen, (open) => {
 							</div>
 							<button
 								type="button"
-								class="flex aspect-square items-center justify-center border border-dashed border-neutral-300 text-neutral-500 hover:border-blue-600 hover:text-blue-700 focus:outline-none disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-400 dark:hover:border-blue-400 dark:hover:text-blue-400"
-								:disabled="attachmentUploading"
+								class="flex aspect-square items-center justify-center border border-dashed border-neutral-300 text-neutral-500 hover:border-blue-600 hover:text-blue-700 focus:outline-none dark:border-neutral-600 dark:text-neutral-400 dark:hover:border-blue-400 dark:hover:text-blue-400"
 								aria-label="Add attachment"
 								title="Add attachment"
 								@click="onPickAttachment"
 							>
-								<ImagePlus v-if="!attachmentUploading" class="h-5 w-5" />
-								<span v-else class="text-xs">Uploading...</span>
+								<ImagePlus class="h-5 w-5" />
 							</button>
 						</div>
 						<input ref="attachmentInput" type="file" class="hidden" @change="onAttachmentFile" />

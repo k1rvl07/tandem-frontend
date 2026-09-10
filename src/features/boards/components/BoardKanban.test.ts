@@ -36,7 +36,7 @@ const apiMocks = vi.hoisted(() => ({
     on: vi.fn(),
   },
   http: { get: vi.fn() },
-  files: { uploadImage: vi.fn(), getSignedUrl: vi.fn() },
+  files: { uploadImage: vi.fn(), getSignedUrl: vi.fn(), deleteImage: vi.fn() },
 }))
 
 vi.mock('@/features/boards/api', () => apiMocks.boards)
@@ -248,6 +248,92 @@ describe('BoardKanban', () => {
     wrapper.unmount()
   })
 
+  it('defers attachment removal until save', async () => {
+    apiMocks.boards.listAttachments.mockResolvedValue([attachment])
+    apiMocks.boards.updateTask.mockResolvedValue(taskDetail)
+    const wrapper = await mountKanban()
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('a[target="_blank"]')).toHaveLength(1)
+
+    await wrapper.find('button[aria-label="Remove attachment"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('a[target="_blank"]')).toHaveLength(0)
+    expect(apiMocks.boards.deleteAttachment).not.toHaveBeenCalled()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(apiMocks.boards.deleteAttachment).toHaveBeenCalledTimes(1)
+    expect(apiMocks.boards.deleteAttachment).toHaveBeenCalledWith('ws1', 't1', 'att1')
+    wrapper.unmount()
+  })
+
+  it('keeps removed attachment after cancel', async () => {
+    apiMocks.boards.listAttachments.mockResolvedValue([attachment])
+    const wrapper = await mountKanban()
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('a[target="_blank"]')).toHaveLength(1)
+
+    await wrapper.find('button[aria-label="Remove attachment"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('a[target="_blank"]')).toHaveLength(0)
+    expect(apiMocks.boards.deleteAttachment).not.toHaveBeenCalled()
+
+    const cancel = wrapper.findAll('button').find((b) => b.text() === 'Cancel')
+    if (cancel) {
+      await cancel.trigger('click')
+    }
+    await flushPromises()
+
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('a[target="_blank"]')).toHaveLength(1)
+    expect(apiMocks.boards.deleteAttachment).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('defers new attachment upload until save', async () => {
+    apiMocks.boards.updateTask.mockResolvedValue(taskDetail)
+    const wrapper = await mountKanban()
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+
+    const input = wrapper.findAll('input[type="file"]')[1]
+    const file = new File(['x'], 'doc.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(apiMocks.boards.createAttachment).not.toHaveBeenCalled()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(apiMocks.boards.createAttachment).toHaveBeenCalledTimes(1)
+    expect(apiMocks.boards.createAttachment).toHaveBeenCalledWith('ws1', 't1', file)
+    wrapper.unmount()
+  })
+
+  it('discards a newly picked attachment on cancel', async () => {
+    const wrapper = await mountKanban()
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+
+    const input = wrapper.findAll('input[type="file"]')[1]
+    const file = new File(['x'], 'doc.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [file] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(apiMocks.boards.createAttachment).not.toHaveBeenCalled()
+
+    const cancel = wrapper.findAll('button').find((b) => b.text() === 'Cancel')
+    if (cancel) {
+      await cancel.trigger('click')
+    }
+    await flushPromises()
+    expect(apiMocks.boards.createAttachment).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('joins the workspace room and subscribes to events on mount', async () => {
     const wrapper = await mountKanban()
     expect(apiMocks.ws.connect).toHaveBeenCalledTimes(1)
@@ -262,6 +348,103 @@ describe('BoardKanban', () => {
     ]) {
       expect(apiMocks.ws.on).toHaveBeenCalledWith(type, expect.any(Function))
     }
+    wrapper.unmount()
+  })
+
+  it('defers cover upload until save', async () => {
+    apiMocks.files.uploadImage.mockResolvedValue({ key: 'covers/u1/cover.jpg' })
+    apiMocks.files.getSignedUrl.mockResolvedValue('https://cdn.example.com/cover.jpg')
+    apiMocks.boards.updateTask.mockResolvedValue(taskDetail)
+    const wrapper = await mountKanban()
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+
+    const coverInput = wrapper.find('input[type="file"][accept="image/*"]')
+    const file = new File(['x'], 'cover.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(coverInput.element, 'files', { value: [file] })
+    await coverInput.trigger('change')
+    await flushPromises()
+    expect(apiMocks.files.uploadImage).not.toHaveBeenCalled()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(apiMocks.files.uploadImage).toHaveBeenCalledTimes(1)
+    expect(apiMocks.files.uploadImage).toHaveBeenCalledWith(file, 'covers')
+    expect(apiMocks.boards.updateTask).toHaveBeenCalledWith(
+      'ws1',
+      'b1',
+      't1',
+      expect.objectContaining({ image_key: 'covers/u1/cover.jpg' }),
+    )
+    expect(apiMocks.files.deleteImage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('deletes uploaded cover when task save fails', async () => {
+    apiMocks.files.uploadImage.mockResolvedValue({ key: 'covers/u1/cover.jpg' })
+    apiMocks.files.getSignedUrl.mockResolvedValue('https://cdn.example.com/cover.jpg')
+    apiMocks.boards.updateTask.mockRejectedValue(new Error('save failed'))
+    const wrapper = await mountKanban()
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+
+    const coverInput = wrapper.find('input[type="file"][accept="image/*"]')
+    const file = new File(['x'], 'cover.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(coverInput.element, 'files', { value: [file] })
+    await coverInput.trigger('change')
+    await flushPromises()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(apiMocks.files.deleteImage).toHaveBeenCalledTimes(1)
+    expect(apiMocks.files.deleteImage).toHaveBeenCalledWith('covers/u1/cover.jpg')
+    wrapper.unmount()
+  })
+
+  it('does not delete cover when save succeeds after replacing a removed cover', async () => {
+    apiMocks.files.uploadImage.mockResolvedValue({ key: 'covers/u1/cover.jpg' })
+    apiMocks.boards.updateTask.mockResolvedValue(taskDetail)
+    const wrapper = await mountKanban()
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+
+    const coverInput = wrapper.find('input[type="file"][accept="image/*"]')
+    const file = new File(['x'], 'cover.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(coverInput.element, 'files', { value: [file] })
+    await coverInput.trigger('change')
+    await flushPromises()
+
+    const removeBtn = wrapper.findAll('button').find((b) => b.text() === 'Remove')
+    if (removeBtn) {
+      await removeBtn.trigger('click')
+    }
+    await flushPromises()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(apiMocks.boards.updateTask).toHaveBeenCalledTimes(1)
+    expect(apiMocks.files.deleteImage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('discards picked cover on cancel', async () => {
+    const wrapper = await mountKanban()
+    await wrapper.find('[data-task-id="t1"]').trigger('click')
+    await flushPromises()
+
+    const coverInput = wrapper.find('input[type="file"][accept="image/*"]')
+    const file = new File(['x'], 'cover.jpg', { type: 'image/jpeg' })
+    Object.defineProperty(coverInput.element, 'files', { value: [file] })
+    await coverInput.trigger('change')
+    await flushPromises()
+    expect(apiMocks.files.uploadImage).not.toHaveBeenCalled()
+
+    const cancel = wrapper.findAll('button').find((b) => b.text() === 'Cancel')
+    if (cancel) {
+      await cancel.trigger('click')
+    }
+    await flushPromises()
+    expect(apiMocks.files.uploadImage).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })
