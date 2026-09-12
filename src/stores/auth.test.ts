@@ -21,6 +21,7 @@ vi.mock('@/features/auth/api', () => apiMocks.auth)
 vi.mock('@/features/profile/api', () => apiMocks.profile)
 
 const TOKEN_KEY = 'tandem_token'
+const REFRESH_KEY = 'tandem_refresh'
 const USER_KEY = 'tandem_user'
 
 function b64url(payload: string): string {
@@ -51,29 +52,34 @@ beforeEach(() => {
 })
 
 describe('useAuthStore', () => {
-  it('signs in and persists token and user', async () => {
-    apiMocks.auth.login.mockResolvedValueOnce({ token: validToken(), user })
+  it('signs in and persists token and refresh token', async () => {
+    apiMocks.auth.login.mockResolvedValueOnce({ token: validToken(), refresh_token: 'rt-1', user })
     const store = useAuthStore()
 
     await store.login({ login: 'ivanov.ii', password: 'secret' })
 
     expect(store.token).toBe(validToken())
+    expect(store.refreshToken).toBe('rt-1')
     expect(store.user).toEqual(user)
     expect(store.isAuthenticated).toBe(true)
     expect(localStorage.getItem(TOKEN_KEY)).toBe(validToken())
+    expect(localStorage.getItem(REFRESH_KEY)).toBe('rt-1')
     expect(localStorage.getItem(USER_KEY)).toBe(JSON.stringify(user))
   })
 
   it('clearSession removes all session state', () => {
     localStorage.setItem(TOKEN_KEY, validToken())
+    localStorage.setItem(REFRESH_KEY, 'rt-1')
     localStorage.setItem(USER_KEY, JSON.stringify(user))
     const store = useAuthStore()
 
     store.clearSession()
 
     expect(store.token).toBeNull()
+    expect(store.refreshToken).toBeNull()
     expect(store.user).toBeNull()
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull()
+    expect(localStorage.getItem(REFRESH_KEY)).toBeNull()
     expect(localStorage.getItem(USER_KEY)).toBeNull()
   })
 
@@ -125,15 +131,35 @@ describe('useAuthStore', () => {
     expect(store.user).toEqual(updated)
   })
 
-  it('changePassword rotates the token', async () => {
+  it('changePassword rotates token and refresh token', async () => {
     const next = validToken()
-    apiMocks.profile.changePassword.mockResolvedValueOnce(next)
+    apiMocks.profile.changePassword.mockResolvedValueOnce({ token: next, refresh_token: 'rt-2' })
+    localStorage.setItem(REFRESH_KEY, 'rt-1')
     const store = useAuthStore()
 
     await store.changePassword({ current_password: 'old', new_password: 'new-new-new' })
 
     expect(store.token).toBe(next)
+    expect(store.refreshToken).toBe('rt-2')
     expect(localStorage.getItem(TOKEN_KEY)).toBe(next)
+    expect(localStorage.getItem(REFRESH_KEY)).toBe('rt-2')
+  })
+
+  it('applies tokens refreshed in background', () => {
+    const next = validToken()
+    localStorage.setItem(TOKEN_KEY, next)
+    localStorage.setItem(REFRESH_KEY, 'rt-1')
+    const store = useAuthStore()
+
+    window.dispatchEvent(
+      new CustomEvent('tandem:tokens-refreshed', {
+        detail: { token: next, refresh_token: 'rt-3' },
+      }),
+    )
+
+    expect(store.token).toBe(next)
+    expect(store.refreshToken).toBe('rt-3')
+    expect(localStorage.getItem(REFRESH_KEY)).toBe('rt-3')
   })
 
   it('removeAvatar clears avatar_key in the stored user', async () => {

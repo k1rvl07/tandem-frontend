@@ -46,6 +46,7 @@ vi.mock('@/api/http', () => ({
   http: apiMocks.http,
   HTTP_ERROR_EVENT: 'tandem:http-error',
   UNAUTHORIZED_EVENT: 'tandem:unauthorized',
+  TOKENS_REFRESHED_EVENT: 'tandem:tokens-refreshed',
 }))
 vi.mock('@/api/files', () => apiMocks.files)
 vi.mock('vue-draggable-plus', async () => {
@@ -177,6 +178,7 @@ beforeEach(() => {
   apiMocks.boards.getTaskDetail.mockResolvedValue(taskDetail)
   apiMocks.boards.listAttachments.mockResolvedValue([])
   apiMocks.http.get.mockResolvedValue({ data: new Blob(['x']) })
+  apiMocks.files.deleteImage.mockResolvedValue(undefined)
 })
 
 async function mountKanban(): Promise<VueWrapper> {

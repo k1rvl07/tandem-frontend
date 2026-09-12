@@ -11,6 +11,7 @@ import { makeToken } from './test/tokens'
 vi.mock('@/api/http', () => ({
   HTTP_ERROR_EVENT: 'tandem:http-error',
   UNAUTHORIZED_EVENT: 'tandem:unauthorized',
+  TOKENS_REFRESHED_EVENT: 'tandem:tokens-refreshed',
   http: {},
 }))
 

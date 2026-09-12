@@ -16,10 +16,16 @@ export interface LoginRequest {
   password: string
 }
 
-export interface LoginResponse {
+export interface TokenPair {
   token: string
+  refresh_token: string
+}
+
+export interface LoginResponse extends TokenPair {
   user: User
 }
+
+export interface RefreshResponse extends TokenPair {}
 
 export interface ApiError {
   error: string

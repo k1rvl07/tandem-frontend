@@ -1,4 +1,6 @@
 import { ref } from 'vue'
+import { ensureFreshToken } from '@/api/http'
+import { isTokenUsable } from '@/shared/utils/jwt'
 
 export interface WSMessage {
   type: string
@@ -32,10 +34,28 @@ export class WSClient {
     ) {
       return
     }
-    if (!localStorage.getItem(TOKEN_KEY)) {
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (!token) {
       return
     }
-    const token = localStorage.getItem(TOKEN_KEY) ?? ''
+    if (isTokenUsable(token)) {
+      this.openSocket(token)
+      return
+    }
+    void ensureFreshToken().then((fresh) => {
+      if (fresh) {
+        this.openSocket(fresh)
+      }
+    })
+  }
+
+  private openSocket(token: string): void {
+    if (
+      this.socket &&
+      (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)
+    ) {
+      return
+    }
     const socket = new WebSocket(wsUrl(), token ? ['tandem', token] : ['tandem'])
     this.socket = socket
 

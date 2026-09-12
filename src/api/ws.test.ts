@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useWS } from './ws'
 
+const ensureFreshTokenMock = vi.hoisted(() => vi.fn())
+
+vi.mock('@/api/http', () => ({ ensureFreshToken: ensureFreshTokenMock }))
+
 class FakeWebSocket {
   static readonly CONNECTING = 0
   static readonly OPEN = 1
@@ -43,6 +47,16 @@ class FakeWebSocket {
 
 const TOKEN_KEY = 'tandem_token'
 
+function b64url(payload: string): string {
+  const padded = payload.length % 3 === 0 ? payload : payload + ' '.repeat(3 - (payload.length % 3))
+  return btoa(padded).replace(/\+/g, '-').replace(/\//g, '_')
+}
+
+function validToken(): string {
+  const claims = { iss: 'tandem', aud: 'tandem', exp: Math.floor(Date.now() / 1000) + 3600 }
+  return `h.${b64url(JSON.stringify(claims))}.s`
+}
+
 function lastSocket(): FakeWebSocket {
   const instances = FakeWebSocket.instances
   return instances[instances.length - 1]
@@ -51,6 +65,8 @@ function lastSocket(): FakeWebSocket {
 beforeEach(() => {
   FakeWebSocket.instances = []
   localStorage.clear()
+  ensureFreshTokenMock.mockReset()
+  ensureFreshTokenMock.mockResolvedValue('rotated')
   vi.stubGlobal('WebSocket', FakeWebSocket)
   const ws = useWS()
   ws.disconnect()
@@ -69,14 +85,14 @@ describe('WSClient connect', () => {
   })
 
   it('opens a socket with subprotocols when a token exists', () => {
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     useWS().connect()
     expect(FakeWebSocket.instances).toHaveLength(1)
-    expect(lastSocket().protocols).toEqual(['tandem', 'jwt-token'])
+    expect(lastSocket().protocols).toEqual(['tandem', validToken()])
   })
 
   it('marks connected on open and rejoins rooms', () => {
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     ws.join('workspace:w1')
     ws.connect()
@@ -85,8 +101,18 @@ describe('WSClient connect', () => {
     expect(lastSocket().sent).toContain(JSON.stringify({ type: 'join', room: 'workspace:w1' }))
   })
 
+  it('refreshes an expired token before opening', async () => {
+    ensureFreshTokenMock.mockResolvedValueOnce('rotated-refresh')
+    localStorage.setItem(TOKEN_KEY, 'expired')
+    useWS().connect()
+    await Promise.resolve()
+    expect(ensureFreshTokenMock).toHaveBeenCalledTimes(1)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(lastSocket().protocols).toEqual(['tandem', 'rotated-refresh'])
+  })
+
   it('does not reopen while connected', () => {
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     ws.connect()
     lastSocket().open()
@@ -97,7 +123,7 @@ describe('WSClient connect', () => {
 
 describe('WSClient messages', () => {
   it('dispatches typed messages to registered handlers', () => {
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     const handler = vi.fn()
     ws.on('task.updated', handler)
@@ -109,7 +135,7 @@ describe('WSClient messages', () => {
   })
 
   it('ignores malformed messages', () => {
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     const handler = vi.fn()
     ws.on('task.updated', handler)
@@ -120,7 +146,7 @@ describe('WSClient messages', () => {
   })
 
   it('unsubscribes a handler', () => {
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     const handler = vi.fn()
     const unsubscribe = ws.on('presence', handler)
@@ -132,7 +158,7 @@ describe('WSClient messages', () => {
   })
 
   it('forwards join and leave commands to the socket', () => {
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     ws.connect()
     lastSocket().open()
@@ -147,7 +173,7 @@ describe('WSClient messages', () => {
 describe('WSClient heartbeat and reconnect', () => {
   it('sends a ping heartbeat every 30 seconds', () => {
     vi.useFakeTimers()
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     useWS().connect()
     lastSocket().open()
     lastSocket().sent.splice(0)
@@ -157,7 +183,7 @@ describe('WSClient heartbeat and reconnect', () => {
 
   it('reconnects with backoff on close', () => {
     vi.useFakeTimers()
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     ws.connect()
     lastSocket().open()
@@ -170,7 +196,7 @@ describe('WSClient heartbeat and reconnect', () => {
 
   it('stops reconnecting after the maximum number of attempts', () => {
     vi.useFakeTimers()
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     useWS().connect()
     for (let i = 0; i < 6; i++) {
       lastSocket().close()
@@ -184,7 +210,7 @@ describe('WSClient heartbeat and reconnect', () => {
 
   it('does not reconnect when the token is removed', () => {
     vi.useFakeTimers()
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     useWS().connect()
     lastSocket().open()
     localStorage.removeItem(TOKEN_KEY)
@@ -195,7 +221,7 @@ describe('WSClient heartbeat and reconnect', () => {
 
   it('disconnect closes the socket and clears rooms', () => {
     vi.useFakeTimers()
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     ws.join('workspace:w1')
     ws.connect()
@@ -211,7 +237,7 @@ describe('WSClient heartbeat and reconnect', () => {
 
   it('disconnect stops scheduled reconnects', () => {
     vi.useFakeTimers()
-    localStorage.setItem(TOKEN_KEY, 'jwt-token')
+    localStorage.setItem(TOKEN_KEY, validToken())
     const ws = useWS()
     ws.connect()
     lastSocket().open()
