@@ -35,6 +35,7 @@ const hasMore = () => users.value.length < total.value
 const actorId = auth.user?.id ?? ''
 const actorRole = auth.user?.role ?? 'user'
 const isAdmin = actorRole === 'admin'
+const canCreateUser = actorRole === 'admin' || actorRole === 'moderator'
 
 const availableRoles: Array<'moderator' | 'user'> =
   actorRole === 'admin' ? ['user', 'moderator'] : ['user']
@@ -214,7 +215,7 @@ onBeforeUnmount(() => {
 		</div>
 
 		<div class="flex flex-col gap-6">
-			<section v-if="isAdmin" class="border border-neutral-300 bg-white p-6 dark:border-neutral-700 dark:bg-neutral-900">
+			<section v-if="canCreateUser" class="border border-neutral-300 bg-white p-6 dark:border-neutral-700 dark:bg-neutral-900">
 				<h2 class="mb-4 text-lg text-neutral-900 dark:text-neutral-100">Create user</h2>
 				<form class="flex flex-col gap-4" novalidate @submit.prevent="onCreateUser">
 					<div class="flex flex-col gap-1">
