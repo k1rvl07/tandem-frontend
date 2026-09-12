@@ -307,7 +307,7 @@ onBeforeUnmount(() => {
 				>
 					<table v-if="users.length > 0" class="w-full text-sm">
 						<thead>
-							<tr class="sticky top-0 z-[70] border-b border-neutral-300 bg-white text-left text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
+							<tr class="sticky top-0 z-40 border-b border-neutral-300 bg-white text-left text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
 								<th class="whitespace-nowrap py-2 pr-4">Login</th>
 								<th class="whitespace-nowrap py-2 pr-4">Display name</th>
 								<th class="whitespace-nowrap py-2 pr-4">Role</th>
